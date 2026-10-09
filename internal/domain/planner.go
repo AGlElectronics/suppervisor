@@ -56,17 +56,20 @@ func (Planner) Validate(req PlanRequest, c Candidate, profiles []Profile, recent
 func (Planner) Score(req PlanRequest, c Candidate, profiles []Profile, recent []Candidate) ScoreBreakdown {
 	score := ScoreBreakdown{
 		Preference:  20,
+		Fairness:    20,
+		ByDiner:     make(map[string]float64),
 		Time:        20,
 		Cost:        15,
 		Leftovers:   10,
 		Novelty:     10,
 		Ingredients: 10,
 	}
-	var preference, count float64
+	var dinerScores []float64
 	for _, p := range profiles {
 		if !slices.Contains(req.Diners, p.ID) {
 			continue
 		}
+		var preference, count float64
 		for _, tag := range c.Tags {
 			preference += p.Preferences[strings.ToLower(tag)]
 			count++
@@ -77,9 +80,26 @@ func (Planner) Score(req PlanRequest, c Candidate, profiles []Profile, recent []
 				count++
 			}
 		}
+		dinerScore := 20.0
+		if count > 0 {
+			dinerScore = clamp(20+preference/count*8, 0, 40)
+		}
+		dinerScore = round(dinerScore)
+		score.ByDiner[p.ID] = dinerScore
+		dinerScores = append(dinerScores, dinerScore)
 	}
-	if count > 0 {
-		score.Preference = clamp(20+preference/count*8, 0, 40)
+	if len(dinerScores) > 0 {
+		var total float64
+		minimum := dinerScores[0]
+		for _, dinerScore := range dinerScores {
+			total += dinerScore
+			minimum = math.Min(minimum, dinerScore)
+		}
+		average := total / float64(len(dinerScores))
+		score.Fairness = round(minimum)
+		// Keep a strong average fit while preventing one diner from being hidden
+		// by another diner's high score.
+		score.Preference = round(clamp(average-(average-minimum)*0.5, 0, 40))
 	}
 	if req.MaxMinutes > 0 {
 		score.Time = clamp(20*(1-float64(c.TotalMinutes)/float64(req.MaxMinutes)*0.35), 0, 20)

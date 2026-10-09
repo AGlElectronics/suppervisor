@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -86,6 +85,17 @@ func (g Generator) Candidates(ctx context.Context, req domain.PlanRequest) ([]do
 			lastErr = fmt.Errorf("invalid JSON: %w", err)
 			continue
 		}
+		var shape struct {
+			Candidates []map[string]json.RawMessage `json:"candidates"`
+		}
+		if err := json.Unmarshal([]byte(raw), &shape); err != nil {
+			lastErr = fmt.Errorf("invalid candidate shape: %w", err)
+			continue
+		}
+		if err := validateCandidateShape(shape.Candidates); err != nil {
+			lastErr = err
+			continue
+		}
 		if err := validateCandidates(envelope.Candidates); err != nil {
 			lastErr = err
 			continue
@@ -96,13 +106,40 @@ func (g Generator) Candidates(ctx context.Context, req domain.PlanRequest) ([]do
 }
 
 func validateCandidates(items []domain.Candidate) error {
-	if len(items) < 1 {
-		return errors.New("no candidates")
+	if len(items) != 3 {
+		return fmt.Errorf("expected exactly three candidates, got %d", len(items))
 	}
 	for i, candidate := range items {
-		if strings.TrimSpace(candidate.Title) == "" || candidate.Servings < 1 || candidate.TotalMinutes < 1 ||
-			candidate.CostPence < 1 || len(candidate.Ingredients) == 0 || len(candidate.Steps) == 0 {
+		if strings.TrimSpace(candidate.Title) == "" || strings.TrimSpace(candidate.Summary) == "" ||
+			candidate.Servings < 1 || candidate.ActiveMinutes < 1 || candidate.TotalMinutes < candidate.ActiveMinutes ||
+			candidate.CostPence < 1 || len(candidate.Ingredients) == 0 || len(candidate.Equipment) == 0 ||
+			len(candidate.Tags) == 0 || len(candidate.Steps) == 0 {
 			return fmt.Errorf("candidate %d lacks required recipe fields", i+1)
+		}
+		for _, ingredient := range candidate.Ingredients {
+			if strings.TrimSpace(ingredient.Name) == "" || ingredient.Quantity <= 0 {
+				return fmt.Errorf("candidate %d contains an invalid ingredient", i+1)
+			}
+		}
+		for _, step := range candidate.Steps {
+			if strings.TrimSpace(step.Title) == "" || strings.TrimSpace(step.Detail) == "" || step.Minutes < 1 {
+				return fmt.Errorf("candidate %d contains an invalid cooking step", i+1)
+			}
+		}
+	}
+	return nil
+}
+
+func validateCandidateShape(items []map[string]json.RawMessage) error {
+	if len(items) != 3 {
+		return fmt.Errorf("expected exactly three candidates, got %d", len(items))
+	}
+	required := []string{"title", "summary", "servings", "activeMinutes", "totalMinutes", "costPence", "ingredients", "equipment", "tags", "reheatsWell", "steps"}
+	for index, candidate := range items {
+		for _, key := range required {
+			if _, ok := candidate[key]; !ok {
+				return fmt.Errorf("candidate %d is missing %s", index+1, key)
+			}
 		}
 	}
 	return nil

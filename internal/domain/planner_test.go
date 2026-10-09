@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestRankHardConstraintsBeforeScore(t *testing.T) {
 	req := PlanRequest{
@@ -31,7 +34,24 @@ func TestScoreIsDeterministicAndPenalizesRecentMeal(t *testing.T) {
 	if first.Total <= second.Total {
 		t.Fatalf("expected recent meal penalty: first %.1f, second %.1f", first.Total, second.Total)
 	}
-	if again := planner.Score(req, candidate, profiles, nil); again != first {
+	if again := planner.Score(req, candidate, profiles, nil); !reflect.DeepEqual(again, first) {
 		t.Fatalf("score changed between identical runs: %#v != %#v", again, first)
+	}
+}
+
+func TestScoreExposesPerDinerFitAndPenalizesImbalance(t *testing.T) {
+	req := ParseRequest("Dinner for both")
+	profiles := []Profile{
+		{ID: "alan", Preferences: map[string]float64{"spicy": 2}},
+		{ID: "partner", Preferences: map[string]float64{"spicy": -1}},
+	}
+	candidate := Candidate{Title: "Chilli", Tags: []string{"spicy"}, Servings: 4, TotalMinutes: 20, CostPence: 500, ReheatsWell: true}
+	score := (Planner{}).Score(req, candidate, profiles, nil)
+	if len(score.ByDiner) != 2 || score.ByDiner["alan"] <= score.ByDiner["partner"] {
+		t.Fatalf("expected transparent opposing diner scores, got %#v", score.ByDiner)
+	}
+	average := (score.ByDiner["alan"] + score.ByDiner["partner"]) / 2
+	if score.Preference >= average || score.Fairness != score.ByDiner["partner"] {
+		t.Fatalf("expected fairness penalty and minimum diner score, got %#v", score)
 	}
 }

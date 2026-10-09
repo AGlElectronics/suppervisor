@@ -270,6 +270,55 @@ func (p *Postgres) Decisions(ctx context.Context, limit int) ([]domain.Decision,
 	return out, rows.Err()
 }
 
+func (p *Postgres) DecisionByID(ctx context.Context, id string) (domain.Decision, error) {
+	var decision domain.Decision
+	var request, candidate, score, violations []byte
+	err := p.Pool.QueryRow(ctx, `SELECT d.id,d.request,r.body,d.score,d.violations,d.status,d.correction,d.created_at
+		FROM decisions d JOIN recipes r ON r.id=d.recipe_id WHERE d.id=$1`, id).
+		Scan(&decision.ID, &request, &candidate, &score, &violations, &decision.Status, &decision.Correction, &decision.CreatedAt)
+	if err != nil {
+		return decision, err
+	}
+	if err := json.Unmarshal(request, &decision.Request); err != nil {
+		return decision, err
+	}
+	if err := json.Unmarshal(candidate, &decision.Candidate); err != nil {
+		return decision, err
+	}
+	if err := json.Unmarshal(score, &decision.Score); err != nil {
+		return decision, err
+	}
+	if err := json.Unmarshal(violations, &decision.Violations); err != nil {
+		return decision, err
+	}
+	return decision, nil
+}
+
+func (p *Postgres) RecentMeals(ctx context.Context, limit int) ([]domain.Candidate, error) {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	rows, err := p.Pool.Query(ctx, `SELECT r.body FROM decisions d JOIN recipes r ON r.id=d.recipe_id
+		WHERE d.status IN ('accepted','cooked') ORDER BY d.updated_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Candidate
+	for rows.Next() {
+		var body []byte
+		var candidate domain.Candidate
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(body, &candidate); err != nil {
+			return nil, err
+		}
+		out = append(out, candidate)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) DecisionEvents(ctx context.Context) ([]domain.DecisionEvent, error) {
 	rows, err := p.Pool.Query(ctx, `SELECT id,decision_id,event_type,actor,detail,created_at FROM decision_events ORDER BY created_at DESC LIMIT 200`)
 	if err != nil {

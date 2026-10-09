@@ -54,13 +54,15 @@ type Candidate struct {
 }
 
 type ScoreBreakdown struct {
-	Preference  float64 `json:"preference"`
-	Time        float64 `json:"time"`
-	Cost        float64 `json:"cost"`
-	Leftovers   float64 `json:"leftovers"`
-	Novelty     float64 `json:"novelty"`
-	Ingredients float64 `json:"ingredients"`
-	Total       float64 `json:"total"`
+	Preference  float64            `json:"preference"`
+	Fairness    float64            `json:"fairness"`
+	ByDiner     map[string]float64 `json:"byDiner"`
+	Time        float64            `json:"time"`
+	Cost        float64            `json:"cost"`
+	Leftovers   float64            `json:"leftovers"`
+	Novelty     float64            `json:"novelty"`
+	Ingredients float64            `json:"ingredients"`
+	Total       float64            `json:"total"`
 }
 
 type Decision struct {

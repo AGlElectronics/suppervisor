@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/AGlElectronics/suppervisor/internal/domain"
@@ -42,15 +43,12 @@ func (s Service) Plan(ctx context.Context, input PlanInput) ([]domain.Decision, 
 	if err != nil {
 		return nil, err
 	}
-	history, err := s.Store.Decisions(ctx, 12)
-	if err != nil {
+	if err := domain.ValidateRequest(req, profiles); err != nil {
 		return nil, err
 	}
-	recent := make([]domain.Candidate, 0, len(history))
-	for _, decision := range history {
-		if decision.Status == "accepted" || decision.Status == "cooked" {
-			recent = append(recent, decision.Candidate)
-		}
+	recent, err := s.Store.RecentMeals(ctx, 20)
+	if err != nil {
+		return nil, err
 	}
 	candidates, err := s.Generator.Candidates(ctx, req)
 	if err != nil {
@@ -73,6 +71,16 @@ func (s Service) SetStatus(ctx context.Context, id, status, correction string) e
 	default:
 		return fmt.Errorf("unsupported decision status %q", status)
 	}
+	decision, err := s.Store.DecisionByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if status == "accepted" && len(decision.Violations) > 0 {
+		return fmt.Errorf("candidate is ineligible: %s", strings.Join(decision.Violations, "; "))
+	}
+	if status == "cooked" && decision.Status != "accepted" {
+		return errors.New("only an accepted dinner can be marked cooked")
+	}
 	return s.Store.SetDecisionStatus(ctx, id, status, correction)
 }
 
@@ -89,16 +97,17 @@ func (s Service) Rate(ctx context.Context, rating domain.Rating) ([]domain.Prefe
 			return nil, errors.New("rating tags must contain 1 to 40 characters")
 		}
 	}
-	decisions, err := s.Store.Decisions(ctx, 100)
+	decision, err := s.Store.DecisionByID(ctx, rating.DecisionID)
 	if err != nil {
 		return nil, err
 	}
-	for _, decision := range decisions {
-		if decision.ID == rating.DecisionID {
-			return s.Store.SaveRating(ctx, rating, decision.Candidate)
-		}
+	if decision.Status != "accepted" && decision.Status != "cooked" {
+		return nil, errors.New("only accepted or cooked dinners can be rated")
 	}
-	return nil, errors.New("decision not found")
+	if !slices.Contains(decision.Request.Diners, rating.ProfileID) {
+		return nil, errors.New("rating profile was not a diner for this decision")
+	}
+	return s.Store.SaveRating(ctx, rating, decision.Candidate)
 }
 
 func Shopping(candidate domain.Candidate, available []string) []domain.ShoppingItem {
