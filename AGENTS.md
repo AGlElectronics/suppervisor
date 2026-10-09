@@ -30,10 +30,14 @@ Run:
 gofmt -w cmd internal
 go test ./...
 go vet ./...
-cd web && npm run lint && npm run build
+cd web
+npm test
+npm run test:migrations
+npm run lint
+npm run build
 ```
 
-When deployment files change, also run strict Helm lint and render. Use conventional commits. Do not commit `.env`, credentials, tokens, generated `dist`, or database data.
+When UI behavior changes, run `npm run test:ui:chrome` against the Vite server when Chrome is available. When deployment files change, also run official Compose config validation plus strict Helm lint/render and Kubernetes schema validation. Use conventional commits. Do not commit `.env`, credentials, tokens, generated `dist`, or database data.
 
 ## Database changes
 

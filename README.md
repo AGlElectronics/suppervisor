@@ -38,6 +38,19 @@ docker compose exec ollama ollama pull qwen3:8b
 
 Set Telegram values in `.env` only. Suppervisor refuses to start with a bot token but no `TELEGRAM_ALLOWED_USER_IDS`.
 
+Telegram accepts ordinary dinner briefs plus:
+
+```text
+/accept <decision>
+/reject <decision>
+/adjust <decision> <change>
+/shop <decision>
+/cook <decision>
+/rate <decision> <alan|partner> <overall> <taste> <ease> <reheat> [notes]
+```
+
+Update IDs are claimed in PostgreSQL before processing, making polling restarts and webhook redelivery idempotent.
+
 ## Run services directly
 
 Start PostgreSQL, export `DATABASE_URL`, then:
@@ -81,15 +94,21 @@ The Vite server runs on <http://localhost:4179> and proxies `/api` to port `8091
 ```sh
 go test ./...
 go vet ./...
-cd web && npm ci && npm run lint && npm run build
+cd web
+npm ci
+npm test
+npm run test:migrations
+npm run test:ui:chrome # requires Chrome and a running Vite server
+npm run lint
+npm run build
 helm lint deploy/helm/suppervisor --strict
 helm template suppervisor deploy/helm/suppervisor
 ```
 
-Migrations live in `internal/store/migrations`. Every migration must include non-empty `-- +suppervisor Up` and `-- +suppervisor Down` sections; the test suite validates this.
+Migrations live in `internal/store/migrations`. Every migration must include non-empty `-- +suppervisor Up` and `-- +suppervisor Down` sections. Go tests validate the contract, while the PGlite check executes up, constraints, compensating preference events, and down on an embedded PostgreSQL-compatible engine.
 
 ## Production
 
-The Helm chart under `deploy/helm/suppervisor` targets Kubernetes/Talos and expects external PostgreSQL plus existing Kubernetes Secrets. Application containers run non-root with read-only root filesystems, health probes, resource limits, dropped capabilities, short-lived migration Jobs, and graceful termination. Optional in-cluster Ollama has PVC and GPU controls.
+The Helm chart under `deploy/helm/suppervisor` targets Kubernetes/Talos and expects external PostgreSQL plus existing Kubernetes Secrets. Application containers run non-root with read-only root filesystems, health probes, resource limits, dropped capabilities, short-lived migration Jobs, and graceful termination. Optional in-cluster Ollama has PVC and GPU controls. Production rendering rejects empty or `latest` application image tags; deploy commit-SHA or immutable release tags.
 
 See [Talos deployment notes](docs/talos-deployment.md) and [architecture](docs/architecture.md).

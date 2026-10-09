@@ -37,6 +37,7 @@ Ollama receives a JSON-only schema request. Missing or malformed candidate field
 ## Authentication boundaries
 
 - Browser REST uses Keycloak OIDC ID tokens.
+- The PWA discovers the public issuer/client configuration, performs Authorization Code + PKCE through Keycloak, and keeps the ID token in session storage only.
 - `AUTH_DEV_BYPASS` is accepted only outside `APP_ENV=production`.
 - Telegram requires a numeric user allowlist whenever a bot token is configured.
 - Webhooks require Telegram’s `X-Telegram-Bot-Api-Secret-Token`.

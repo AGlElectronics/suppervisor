@@ -35,6 +35,8 @@ helm template suppervisor deploy/helm/suppervisor \
   --set auth.issuer=https://keycloak.example.com/realms/home
 ```
 
+Use the commit-SHA tags emitted by the release pipeline. The chart rejects empty and `latest` application tags when `config.environment=production`.
+
 Install:
 
 ```sh
