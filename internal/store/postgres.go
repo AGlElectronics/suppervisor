@@ -144,7 +144,10 @@ func (p *Postgres) SeedDemo(ctx context.Context) error {
 			'demo',
 			'{"note":"development-only accepted meal"}',
 			now() - interval '1 day'
-		) ON CONFLICT(id) DO NOTHING`)
+		) ON CONFLICT(id) DO NOTHING;
+		INSERT INTO workflow_states(decision_id)
+		VALUES('00000000-0000-4000-8000-000000000001')
+		ON CONFLICT(decision_id) DO NOTHING`)
 	return err
 }
 
@@ -228,6 +231,9 @@ func (p *Postgres) SaveDecision(ctx context.Context, decision domain.Decision) (
 	if _, err = tx.Exec(ctx, `INSERT INTO decision_events(id,decision_id,event_type,actor,detail) VALUES($1,$2,'proposed','system',$3)`, newID(), decision.ID, score); err != nil {
 		return decision, err
 	}
+	if _, err = tx.Exec(ctx, `INSERT INTO workflow_states(decision_id) VALUES($1)`, decision.ID); err != nil {
+		return decision, err
+	}
 	return decision, tx.Commit(ctx)
 }
 
@@ -283,6 +289,35 @@ func (p *Postgres) DecisionEvents(ctx context.Context) ([]domain.DecisionEvent, 
 		out = append(out, event)
 	}
 	return out, rows.Err()
+}
+
+func (p *Postgres) WorkflowStates(ctx context.Context) ([]domain.WorkflowState, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT decision_id,shopping_checked,cooking_step,updated_at FROM workflow_states ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.WorkflowState
+	for rows.Next() {
+		var state domain.WorkflowState
+		if err := rows.Scan(&state.DecisionID, &state.ShoppingChecked, &state.CookingStep, &state.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, state)
+	}
+	return out, rows.Err()
+}
+
+func (p *Postgres) SaveWorkflowState(ctx context.Context, state domain.WorkflowState) (domain.WorkflowState, error) {
+	checked, err := json.Marshal(state.ShoppingChecked)
+	if err != nil {
+		return state, err
+	}
+	err = p.Pool.QueryRow(ctx, `INSERT INTO workflow_states(decision_id,shopping_checked,cooking_step)
+		VALUES($1,$2,$3)
+		ON CONFLICT(decision_id) DO UPDATE SET shopping_checked=EXCLUDED.shopping_checked,cooking_step=EXCLUDED.cooking_step,updated_at=now()
+		RETURNING updated_at`, state.DecisionID, checked, state.CookingStep).Scan(&state.UpdatedAt)
+	return state, err
 }
 
 func (p *Postgres) SetDecisionStatus(ctx context.Context, id, status, correction string) error {

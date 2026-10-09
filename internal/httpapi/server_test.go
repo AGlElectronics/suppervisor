@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -23,6 +24,17 @@ func TestPublicConfigIsAvailableBeforeOIDCLogin(t *testing.T) {
 	}
 	if body["authRequired"] != true || body["oidcIssuer"] == "" {
 		t.Fatalf("unexpected config: %#v", body)
+	}
+}
+
+func TestWorkflowStateRejectsOutOfBoundsInput(t *testing.T) {
+	server := Server{Config: config.Config{AuthDevBypass: true}}
+	request := httptest.NewRequest(http.MethodPatch, "/api/v1/decisions/decision/workflow", bytes.NewBufferString(`{"shoppingChecked":[],"cookingStep":101}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d", response.Code)
 	}
 }
 

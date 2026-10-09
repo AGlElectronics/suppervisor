@@ -27,6 +27,7 @@ const requiredTables = [
   "recipes",
   "schema_migrations",
   "telegram_updates",
+  "workflow_states",
 ];
 const tables = await db.query(
   "SELECT table_name FROM information_schema.tables WHERE table_schema='public'",
@@ -63,6 +64,12 @@ await db.exec(`
     'alan','italian',-0.5,'migration smoke reversal',
     '10000000-0000-4000-8000-000000000002',
     '10000000-0000-4000-8000-000000000003'
+  );
+  INSERT INTO workflow_states(decision_id,shopping_checked,cooking_step)
+  VALUES(
+    '10000000-0000-4000-8000-000000000001',
+    '["orzo"]',
+    2
   );
 `);
 const balance = await db.query(

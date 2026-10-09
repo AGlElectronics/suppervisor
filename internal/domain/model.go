@@ -111,3 +111,10 @@ type ShoppingItem struct {
 	Unit     string  `json:"unit"`
 	Checked  bool    `json:"checked"`
 }
+
+type WorkflowState struct {
+	DecisionID      string    `json:"decisionId"`
+	ShoppingChecked []string  `json:"shoppingChecked"`
+	CookingStep     int       `json:"cookingStep"`
+	UpdatedAt       time.Time `json:"updatedAt"`
+}

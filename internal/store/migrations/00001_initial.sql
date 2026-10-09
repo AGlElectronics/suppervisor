@@ -37,6 +37,14 @@ CREATE TABLE decisions (
 );
 CREATE INDEX decisions_created_idx ON decisions (created_at DESC);
 
+CREATE TABLE workflow_states (
+  decision_id uuid PRIMARY KEY REFERENCES decisions(id) ON DELETE CASCADE,
+  shopping_checked jsonb NOT NULL DEFAULT '[]'
+    CHECK (jsonb_typeof(shopping_checked) = 'array'),
+  cooking_step integer NOT NULL DEFAULT 0 CHECK (cooking_step >= 0),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE decision_events (
   id uuid PRIMARY KEY,
   decision_id uuid NOT NULL REFERENCES decisions(id),
@@ -93,6 +101,7 @@ DROP TABLE IF EXISTS telegram_updates;
 DROP TABLE IF EXISTS preference_events;
 DROP TABLE IF EXISTS ratings;
 DROP TABLE IF EXISTS decision_events;
+DROP TABLE IF EXISTS workflow_states;
 DROP TABLE IF EXISTS decisions;
 DROP TABLE IF EXISTS recipes;
 DROP TABLE IF EXISTS profiles;

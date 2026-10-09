@@ -32,7 +32,7 @@ func TestInitialSchemaSupportsImmutableAuditEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	schema := string(raw)
-	for _, required := range []string{"CREATE TABLE decision_events", "reversal_of uuid UNIQUE", "CREATE TABLE telegram_updates"} {
+	for _, required := range []string{"CREATE TABLE decision_events", "reversal_of uuid UNIQUE", "CREATE TABLE telegram_updates", "CREATE TABLE workflow_states"} {
 		if !strings.Contains(schema, required) {
 			t.Fatalf("initial schema missing %q", required)
 		}

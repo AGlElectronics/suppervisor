@@ -41,6 +41,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/bootstrap", s.bootstrap)
 	mux.HandleFunc("POST /api/v1/plans", s.plan)
 	mux.HandleFunc("PATCH /api/v1/decisions/{id}", s.decision)
+	mux.HandleFunc("PATCH /api/v1/decisions/{id}/workflow", s.workflow)
 	mux.HandleFunc("POST /api/v1/ratings", s.rate)
 	mux.HandleFunc("POST /api/v1/preferences/events/{id}/revert", s.revertPreference)
 	return s.logging(s.cors(s.auth(mux)))
@@ -85,6 +86,11 @@ func (s Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
+	workflowStates, err := s.Store.WorkflowStates(r.Context())
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
 	events, err := s.Store.PreferenceEvents(r.Context())
 	if err != nil {
 		writeError(w, 500, err.Error())
@@ -95,7 +101,7 @@ func (s Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"profiles": profiles, "recipes": recipes, "decisions": decisions, "decisionEvents": decisionEvents, "preferenceEvents": events, "ratings": ratings})
+	writeJSON(w, 200, map[string]any{"profiles": profiles, "recipes": recipes, "decisions": decisions, "decisionEvents": decisionEvents, "workflowStates": workflowStates, "preferenceEvents": events, "ratings": ratings})
 }
 
 func (s Server) plan(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +130,41 @@ func (s Server) decision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s Server) workflow(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		ShoppingChecked []string `json:"shoppingChecked"`
+		CookingStep     int      `json:"cookingStep"`
+	}
+	if !decode(w, r, &input) {
+		return
+	}
+	if input.CookingStep < 0 || input.CookingStep > 100 || len(input.ShoppingChecked) > 200 {
+		writeError(w, http.StatusUnprocessableEntity, "workflow state is outside supported bounds")
+		return
+	}
+	seen := map[string]bool{}
+	checked := make([]string, 0, len(input.ShoppingChecked))
+	for _, item := range input.ShoppingChecked {
+		item = strings.TrimSpace(item)
+		if item == "" || len(item) > 200 {
+			writeError(w, http.StatusUnprocessableEntity, "shopping item names must contain 1 to 200 characters")
+			return
+		}
+		if !seen[item] {
+			seen[item] = true
+			checked = append(checked, item)
+		}
+	}
+	state, err := s.Store.SaveWorkflowState(r.Context(), domain.WorkflowState{
+		DecisionID: r.PathValue("id"), ShoppingChecked: checked, CookingStep: input.CookingStep,
+	})
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, state)
 }
 
 func (s Server) rate(w http.ResponseWriter, r *http.Request) {
