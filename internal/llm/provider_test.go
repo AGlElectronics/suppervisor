@@ -2,12 +2,19 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/AGlElectronics/suppervisor/internal/domain"
 )
+
+type unavailableProvider struct{}
+
+func (unavailableProvider) Complete(context.Context, string, string) (string, error) {
+	return "", errors.New("offline")
+}
 
 type sequenceProvider struct {
 	responses []string
@@ -50,5 +57,20 @@ func TestGeneratorRetriesInvalidCandidateOnce(t *testing.T) {
 	}
 	if provider.calls != 2 || len(items) != 3 || items[0].Title != "Dinner one" {
 		t.Fatalf("retry did not return corrected candidate: calls=%d items=%#v", provider.calls, items)
+	}
+}
+
+func TestGeneratorFallsBackDeterministicallyWhenProviderIsUnavailable(t *testing.T) {
+	items, err := (Generator{Provider: unavailableProvider{}}).Candidates(
+		context.Background(),
+		domain.ParseRequest("Dinner under 30 minutes"),
+	)
+	if err != nil || len(items) != 3 {
+		t.Fatalf("expected three local fallback candidates: %#v %v", items, err)
+	}
+	for _, item := range items {
+		if item.Source != "deterministic-fallback" {
+			t.Fatalf("fallback source was not exposed: %#v", item)
+		}
 	}
 }

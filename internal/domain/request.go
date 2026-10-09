@@ -23,6 +23,10 @@ func ParseRequest(text string) PlanRequest {
 		req.Diners, req.Servings = []string{"alan"}, 1
 		req.Assumptions = removeAssumption(req.Assumptions, "both diners")
 	}
+	if strings.Contains(lower, "just partner") || strings.Contains(lower, "partner only") || strings.Contains(lower, "only partner") {
+		req.Diners, req.Servings = []string{"partner"}, 1
+		req.Assumptions = removeAssumption(req.Assumptions, "both diners")
+	}
 	if m := numberBefore(`(?:people|diners|servings)`).FindStringSubmatch(lower); len(m) == 2 {
 		req.Servings, _ = strconv.Atoi(m[1])
 	}
@@ -47,12 +51,33 @@ func ParseRequest(text string) PlanRequest {
 		req.Equipment = []string{"hob"}
 		req.Assumptions = removeAssumption(req.Assumptions, "standard hob and oven available")
 	}
-	for _, phrase := range []struct {
-		marker string
-		value  string
-	}{{"no mushroom", "mushrooms"}, {"no fish", "fish"}, {"no aubergine", "aubergine"}, {"no coriander", "coriander"}} {
-		if strings.Contains(lower, phrase.marker) {
-			req.Avoid = append(req.Avoid, phrase.value)
+	if strings.Contains(lower, "no hob") {
+		req.Equipment = []string{"oven"}
+		req.Assumptions = removeAssumption(req.Assumptions, "standard hob and oven available")
+	}
+	for _, equipment := range []string{"microwave", "air fryer", "hob", "oven"} {
+		if strings.Contains(lower, "only "+equipment) || strings.Contains(lower, "just "+equipment) {
+			req.Equipment = []string{equipment}
+			req.Assumptions = removeAssumption(req.Assumptions, "standard hob and oven available")
+		}
+	}
+	avoidPattern := regexp.MustCompile(`(?:no|without|avoid)\s+([a-z][a-z-]*)`)
+	for _, match := range avoidPattern.FindAllStringSubmatch(lower, -1) {
+		value := strings.TrimSpace(match[1])
+		if value != "" && value != "oven" && value != "hob" && !containsFold(req.Avoid, value) {
+			req.Avoid = append(req.Avoid, value)
+		}
+	}
+	availablePattern := regexp.MustCompile(`(?:have|using|use up)\s+([a-z][a-z ,&-]{1,80})`)
+	if match := availablePattern.FindStringSubmatch(lower); len(match) == 2 {
+		value := match[1]
+		for _, stop := range []string{" tonight", " under", " for ", " but ", " with no", ", no ", ", only ", "."} {
+			value = strings.SplitN(value, stop, 2)[0]
+		}
+		for _, item := range regexp.MustCompile(`\s*(?:,|&|\band\b)\s*`).Split(value, -1) {
+			if item = strings.TrimSpace(item); item != "" && len(item) <= 40 {
+				req.Available = append(req.Available, item)
+			}
 		}
 	}
 	return req

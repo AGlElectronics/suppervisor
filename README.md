@@ -49,7 +49,9 @@ Telegram accepts ordinary dinner briefs plus:
 /rate <decision> <alan|partner> <overall> <taste> <ease> <reheat> [notes]
 ```
 
-Update IDs are claimed in PostgreSQL before processing, making polling restarts and webhook redelivery idempotent.
+Update IDs use a PostgreSQL processing/completed/failed lifecycle. Completed updates
+are idempotent, while failed or abandoned deliveries can be reclaimed instead of
+being silently lost.
 
 ## Run services directly
 
@@ -109,6 +111,6 @@ Migrations live in `internal/store/migrations`. Every migration must include non
 
 ## Production
 
-The Helm chart under `deploy/helm/suppervisor` targets Kubernetes/Talos and expects external PostgreSQL plus existing Kubernetes Secrets. Application containers run non-root with read-only root filesystems, health probes, resource limits, dropped capabilities, short-lived migration Jobs, and graceful termination. Optional in-cluster Ollama has PVC and GPU controls. Production rendering rejects empty or `latest` application image tags; deploy commit-SHA or immutable release tags.
+The Helm chart under `deploy/helm/suppervisor` targets Kubernetes/Talos and expects external PostgreSQL plus existing Kubernetes Secrets. Application containers run non-root with read-only root filesystems, health probes, resource limits, dropped capabilities, short-lived migration Jobs, and graceful termination. Serving processes only verify schema state; they do not need migration DDL privileges. Optional in-cluster Ollama has PVC and GPU controls. Production rendering rejects empty or `latest` application image tags; deploy commit-SHA or immutable release tags, overriding the repositories with `$CI_REGISTRY_IMAGE` and `$CI_REGISTRY_IMAGE/web`.
 
 See [Talos deployment notes](docs/talos-deployment.md) and [architecture](docs/architecture.md).

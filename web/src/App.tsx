@@ -704,6 +704,9 @@ function CandidateCard({
             {decision.status === "accepted" ? "Tonight’s plan" : "Top match"}
           </span>
           <h2>{recipe.title}</h2>
+          {recipe.source?.startsWith("deterministic") && (
+            <span className="chip">Reliable local fallback</span>
+          )}
         </div>
       </div>
       <p className="mt-4 text-muted">{recipe.summary}</p>

@@ -32,7 +32,8 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/config: {{ toJson .Values.config | sha256sum }}
+        checksum/runtime-config: {{ toJson (dict "config" .Values.config "auth" .Values.auth "ollama" (dict "enabled" .Values.ollama.enabled "model" .Values.ollama.model)) | sha256sum }}
+        checksum/secret-rollout: {{ toJson (dict "database" .Values.database "secrets" .Values.secrets) | sha256sum }}
         {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
       labels:
         {{- include "suppervisor.selectorLabels" . | nindent 8 }}
@@ -190,7 +191,7 @@ spec:
               value: {{ .Values.auth.issuer | quote }}
             - name: DATABASE_URL
               valueFrom:
-                secretKeyRef: { name: {{ .Values.database.existingSecret }}, key: {{ .Values.database.urlKey }} }
+                secretKeyRef: { name: {{ .Values.migrationDatabase.existingSecret }}, key: {{ .Values.migrationDatabase.urlKey }} }
           resources:
             requests: { cpu: 25m, memory: 64Mi }
             limits: { cpu: 250m, memory: 128Mi }

@@ -15,6 +15,7 @@ export type Ingredient = {
 export type RecipeStep = { title: string; detail: string; minutes: number };
 export type Candidate = {
   id: string;
+  source?: string;
   title: string;
   summary: string;
   servings: number;

@@ -1,10 +1,12 @@
 image:
   backend:
-    repository: ghcr.io/aglelectronics/suppervisor
+    # Override with $CI_REGISTRY_IMAGE from the release pipeline.
+    repository: registry.example.com/suppervisor
     tag: "0.1.0"
     pullPolicy: IfNotPresent
   web:
-    repository: ghcr.io/aglelectronics/suppervisor-web
+    # Override with $CI_REGISTRY_IMAGE/web from the release pipeline.
+    repository: registry.example.com/suppervisor/web
     tag: "0.1.0"
     pullPolicy: IfNotPresent
 
@@ -14,6 +16,12 @@ revisionHistoryLimit: 3
 database:
   # Production always uses an external PostgreSQL service.
   existingSecret: suppervisor-database
+  urlKey: database-url
+
+migrationDatabase:
+  # May reference the same secret initially; production should use a DDL-capable
+  # role distinct from the runtime role.
+  existingSecret: suppervisor-migration-database
   urlKey: database-url
 
 auth:
@@ -36,6 +44,8 @@ secrets:
   telegramTokenKey: telegram-bot-token
   telegramAllowedUsersKey: telegram-allowed-user-ids
   telegramWebhookSecretKey: telegram-webhook-secret
+  # Change when externally managed secret values rotate to restart backend pods.
+  rolloutToken: ""
 
 ingress:
   enabled: true

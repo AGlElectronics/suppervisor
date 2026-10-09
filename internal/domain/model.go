@@ -40,6 +40,7 @@ type Step struct {
 
 type Candidate struct {
 	ID            string       `json:"id"`
+	Source        string       `json:"source,omitempty"`
 	Title         string       `json:"title"`
 	Summary       string       `json:"summary"`
 	Servings      int          `json:"servings"`

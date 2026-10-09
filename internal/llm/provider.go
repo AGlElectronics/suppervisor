@@ -97,7 +97,11 @@ type Generator struct{ Provider Provider }
 
 func (g Generator) Candidates(ctx context.Context, req domain.PlanRequest) ([]domain.Candidate, error) {
 	if g.Provider == nil {
-		return demoCandidates(req), nil
+		items := demoCandidates(req)
+		for index := range items {
+			items[index].Source = "deterministic-local"
+		}
+		return items, nil
 	}
 	request, _ := json.Marshal(req)
 	system := `You are Suppervisor's recipe generator. Return JSON only: {"candidates":[...]}. Each candidate must contain title, summary, servings, activeMinutes, totalMinutes, costPence, ingredients, equipment, tags, reheatsWell and ordered steps. Cost is a realistic whole number of UK pence. Do not decide whether constraints pass: generate concrete recipes for deterministic validation.`
@@ -109,7 +113,8 @@ func (g Generator) Candidates(ctx context.Context, req domain.PlanRequest) ([]do
 		}
 		raw, err := g.Provider.Complete(ctx, system, prompt)
 		if err != nil {
-			return nil, err
+			lastErr = err
+			continue
 		}
 		var envelope struct {
 			Candidates []domain.Candidate `json:"candidates"`
@@ -133,9 +138,16 @@ func (g Generator) Candidates(ctx context.Context, req domain.PlanRequest) ([]do
 			lastErr = err
 			continue
 		}
+		for index := range envelope.Candidates {
+			envelope.Candidates[index].Source = "generated"
+		}
 		return envelope.Candidates, nil
 	}
-	return nil, fmt.Errorf("candidate generation failed after one retry: %w", lastErr)
+	fallback := demoCandidates(req)
+	for index := range fallback {
+		fallback[index].Source = "deterministic-fallback"
+	}
+	return fallback, nil
 }
 
 func validateCandidates(items []domain.Candidate) error {
