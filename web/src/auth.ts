@@ -45,7 +45,7 @@ export async function initialiseAuth(): Promise<AuthState> {
       window.history.replaceState({}, document.title, window.location.pathname);
     }
     const user = await manager.getUser();
-    if (user && !user.expired) {
+    if (user && !user.expired && user.id_token) {
       sessionStorage.setItem("suppervisor-token", user.id_token);
       return { ready: true, required: true, user, error: "" };
     }
