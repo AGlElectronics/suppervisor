@@ -8,7 +8,6 @@ metadata:
   labels: {{- include "suppervisor.labels" . | nindent 4 }}
 data:
   APP_ENV: {{ .Values.config.environment | quote }}
-  AUTH_DEV_BYPASS: {{ .Values.auth.devBypass | quote }}
   DEV_DEMO_DATA: {{ .Values.config.devDemoData | quote }}
   OIDC_ISSUER: {{ .Values.auth.issuer | quote }}
   OIDC_CLIENT_ID: {{ .Values.auth.clientId | quote }}
@@ -53,6 +52,8 @@ spec:
           envFrom:
             - configMapRef: { name: {{ include "suppervisor.fullname" . }} }
           env:
+            - name: AUTH_DEV_BYPASS
+              value: {{ .Values.auth.devBypass | quote }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef: { name: {{ .Values.database.existingSecret }}, key: {{ .Values.database.urlKey }} }
