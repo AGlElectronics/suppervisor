@@ -162,6 +162,9 @@ function App() {
 
   return (
     <div className="min-h-dvh bg-canvas text-ink">
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       <aside className="sidebar">
         <BrandMark />
         <nav aria-label="Main navigation" className="mt-8 grid gap-1">
@@ -235,7 +238,7 @@ function App() {
           )}
         </div>
       </header>
-      <main className="main-shell">
+      <main className="main-shell" id="main-content" tabIndex={-1}>
         {offline && (
           <div className="demo-banner" role="status">
             <WifiOff size={17} />
