@@ -36,6 +36,7 @@ func (s Server) Handler() http.Handler {
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 	})
+	mux.HandleFunc("GET /api/v1/public/config", s.publicConfig)
 	mux.HandleFunc("GET /api/v1/status", s.status)
 	mux.HandleFunc("GET /api/v1/bootstrap", s.bootstrap)
 	mux.HandleFunc("POST /api/v1/plans", s.plan)
@@ -43,6 +44,14 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/ratings", s.rate)
 	mux.HandleFunc("POST /api/v1/preferences/events/{id}/revert", s.revertPreference)
 	return s.logging(s.cors(s.auth(mux)))
+}
+
+func (s Server) publicConfig(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"authRequired": !s.Config.AuthDevBypass,
+		"oidcIssuer":   s.Config.OIDCIssuer,
+		"oidcClientId": s.Config.OIDCClientID,
+	})
 }
 
 func (s Server) status(w http.ResponseWriter, _ *http.Request) {
@@ -140,7 +149,7 @@ func (s Server) revertPreference(w http.ResponseWriter, r *http.Request) {
 
 func (s Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/health/") || r.Method == http.MethodOptions || s.Config.AuthDevBypass {
+		if strings.HasPrefix(r.URL.Path, "/health/") || r.URL.Path == "/api/v1/public/config" || r.Method == http.MethodOptions || s.Config.AuthDevBypass {
 			next.ServeHTTP(w, r)
 			return
 		}

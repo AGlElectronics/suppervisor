@@ -67,7 +67,21 @@ func (p *Postgres) ClaimTelegramUpdate(ctx context.Context, updateID int64) (boo
 }
 
 func (p *Postgres) Migrate(ctx context.Context) error {
-	if _, err := p.Pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+	connection, err := p.Pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer connection.Release()
+	const migrationLockID int64 = 7_219_743_338_774_111
+	if _, err := connection.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationLockID); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_, _ = connection.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, migrationLockID)
+	}()
+	if _, err := connection.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
 	entries, err := fs.Glob(migrationFS, "migrations/*.sql")
@@ -78,7 +92,7 @@ func (p *Postgres) Migrate(ctx context.Context) error {
 	for _, path := range entries {
 		version := strings.TrimSuffix(strings.TrimPrefix(path, "migrations/"), ".sql")
 		var exists bool
-		if err := p.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, version).Scan(&exists); err != nil {
+		if err := connection.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, version).Scan(&exists); err != nil {
 			return err
 		}
 		if exists {
@@ -92,7 +106,7 @@ func (p *Postgres) Migrate(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
-		tx, err := p.Pool.Begin(ctx)
+		tx, err := connection.Begin(ctx)
 		if err != nil {
 			return err
 		}

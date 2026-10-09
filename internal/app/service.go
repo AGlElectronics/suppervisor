@@ -93,9 +93,23 @@ func (s Service) Rate(ctx context.Context, rating domain.Rating) ([]domain.Prefe
 	return nil, errors.New("decision not found")
 }
 
-func Shopping(candidate domain.Candidate) []domain.ShoppingItem {
+func Shopping(candidate domain.Candidate, available []string) []domain.ShoppingItem {
+	have := map[string]bool{}
+	for _, item := range available {
+		have[strings.ToLower(strings.TrimSpace(item))] = true
+	}
 	items := make([]domain.ShoppingItem, 0, len(candidate.Ingredients))
+	index := map[string]int{}
 	for _, ingredient := range candidate.Ingredients {
+		if have[strings.ToLower(strings.TrimSpace(ingredient.Name))] {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(ingredient.Name)) + "|" + strings.ToLower(strings.TrimSpace(ingredient.Unit))
+		if position, ok := index[key]; ok {
+			items[position].Quantity += ingredient.Quantity
+			continue
+		}
+		index[key] = len(items)
 		items = append(items, domain.ShoppingItem{Name: ingredient.Name, Quantity: ingredient.Quantity, Unit: ingredient.Unit})
 	}
 	return items
