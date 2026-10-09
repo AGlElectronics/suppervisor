@@ -37,13 +37,13 @@ func TestPostgresIntegrationLifecycle(t *testing.T) {
 		Equipment:   []string{"hob"}, Tags: []string{"beans"},
 		Steps: []domain.Step{{Title: "Cook", Detail: "Cook the beans.", Minutes: 20}},
 	}
-	saved, err := db.SaveDecisions(ctx, []domain.Decision{{
+	saved, err := db.SaveDecision(ctx, domain.Decision{
 		Request: request, Candidate: candidate, Status: "proposed",
-	}})
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	decision, err := db.DecisionByID(ctx, saved[0].ID)
+	decision, err := db.DecisionByID(ctx, saved.ID)
 	if err != nil || decision.Candidate.Title != candidate.Title {
 		t.Fatalf("decision round trip failed: %#v %v", decision, err)
 	}
@@ -57,7 +57,7 @@ func TestPostgresIntegrationLifecycle(t *testing.T) {
 	if err != nil || len(events) == 0 || events[0].RatingID == nil {
 		t.Fatalf("rating learning was not persisted with provenance: %#v %v", events, err)
 	}
-	if _, err := db.ReversePreferenceEvent(ctx, events[0].ID, "integration correction"); err != nil {
+	if err := db.RevertPreferenceEvent(ctx, events[0].ID); err != nil {
 		t.Fatal(err)
 	}
 
