@@ -31,6 +31,18 @@ func main() {
 }
 
 func run(logger *slog.Logger) error {
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		client := &http.Client{Timeout: 2 * time.Second}
+		response, err := client.Get("http://127.0.0.1:8091/health/ready")
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			return errors.New("health endpoint is not ready")
+		}
+		return nil
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err

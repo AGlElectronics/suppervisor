@@ -1,0 +1,8 @@
+.env
+*.local
+*.log
+coverage.out
+/suppervisor
+/rendered.yaml
+/.idea/
+/.vscode/

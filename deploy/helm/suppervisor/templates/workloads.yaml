@@ -1,0 +1,191 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "suppervisor.fullname" . }}
+  labels: {{- include "suppervisor.labels" . | nindent 4 }}
+data:
+  APP_ENV: {{ .Values.config.environment | quote }}
+  AUTH_DEV_BYPASS: {{ .Values.auth.devBypass | quote }}
+  OIDC_ISSUER: {{ .Values.auth.issuer | quote }}
+  OIDC_CLIENT_ID: {{ .Values.auth.clientId | quote }}
+  WEB_ORIGIN: {{ .Values.config.webOrigin | quote }}
+  OLLAMA_URL: {{ ternary (printf "http://%s-ollama:11434" (include "suppervisor.fullname" .)) .Values.config.ollamaUrl .Values.ollama.enabled | quote }}
+  OLLAMA_MODEL: {{ .Values.config.ollamaModel | quote }}
+  TELEGRAM_MODE: {{ .Values.config.telegramMode | quote }}
+  TELEGRAM_WEBHOOK_URL: {{ .Values.config.telegramWebhookUrl | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "suppervisor.fullname" . }}-backend
+  labels: {{- include "suppervisor.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "suppervisor.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: backend
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ toJson .Values.config | sha256sum }}
+        {{- with .Values.podAnnotations }}{{ toYaml . | nindent 8 }}{{- end }}
+      labels:
+        {{- include "suppervisor.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: backend
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: backend
+          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          securityContext: {{- include "suppervisor.securityContext" . | nindent 12 }}
+          ports:
+            - { name: http, containerPort: 8091, protocol: TCP }
+          envFrom:
+            - configMapRef: { name: {{ include "suppervisor.fullname" . }} }
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.database.existingSecret }}, key: {{ .Values.database.urlKey }} }
+            - name: TELEGRAM_BOT_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: {{ .Values.secrets.telegramTokenKey }}, optional: true }
+            - name: TELEGRAM_ALLOWED_USER_IDS
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: {{ .Values.secrets.telegramAllowedUsersKey }}, optional: true }
+            - name: TELEGRAM_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: {{ .Values.secrets.telegramWebhookSecretKey }}, optional: true }
+          livenessProbe:
+            httpGet: { path: /health/live, port: http }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 8
+          resources: {{- toYaml .Values.resources.backend | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 32Mi }
+      terminationGracePeriodSeconds: 25
+      {{- with .Values.nodeSelector }}nodeSelector: {{ toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.affinity }}affinity: {{ toYaml . | nindent 8 }}{{- end }}
+      {{- with .Values.tolerations }}tolerations: {{ toYaml . | nindent 8 }}{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "suppervisor.fullname" . }}-backend
+  labels: {{- include "suppervisor.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "suppervisor.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+  ports:
+    - { name: http, port: 8091, targetPort: http }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "suppervisor.fullname" . }}-web
+  labels: {{- include "suppervisor.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  selector:
+    matchLabels:
+      {{- include "suppervisor.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        {{- include "suppervisor.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: web
+          image: "{{ .Values.image.web.repository }}:{{ .Values.image.web.tag }}"
+          imagePullPolicy: {{ .Values.image.web.pullPolicy }}
+          securityContext: {{- include "suppervisor.securityContext" . | nindent 12 }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          livenessProbe:
+            httpGet: { path: /health, port: http }
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+          resources: {{- toYaml .Values.resources.web | nindent 12 }}
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+            - { name: cache, mountPath: /var/cache/nginx }
+            - { name: run, mountPath: /var/run }
+      volumes:
+        - { name: tmp, emptyDir: { sizeLimit: 16Mi } }
+        - { name: cache, emptyDir: { sizeLimit: 16Mi } }
+        - { name: run, emptyDir: { sizeLimit: 2Mi } }
+      terminationGracePeriodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "suppervisor.fullname" . }}-web
+  labels: {{- include "suppervisor.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "suppervisor.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: web
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "suppervisor.fullname" . }}-migrate-{{ .Release.Revision }}
+  labels: {{- include "suppervisor.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 4
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "suppervisor.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: migration
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.backend.repository }}:{{ .Values.image.backend.tag }}"
+          imagePullPolicy: {{ .Values.image.backend.pullPolicy }}
+          args: ["migrate"]
+          securityContext: {{- include "suppervisor.securityContext" . | nindent 12 }}
+          env:
+            - name: APP_ENV
+              value: production
+            - name: AUTH_DEV_BYPASS
+              value: "false"
+            - name: OIDC_ISSUER
+              value: {{ .Values.auth.issuer | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef: { name: {{ .Values.database.existingSecret }}, key: {{ .Values.database.urlKey }} }
+          resources:
+            requests: { cpu: 25m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 128Mi }

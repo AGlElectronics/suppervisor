@@ -1,0 +1,75 @@
+image:
+  backend:
+    repository: ghcr.io/aglelectronics/suppervisor
+    tag: latest
+    pullPolicy: IfNotPresent
+  web:
+    repository: ghcr.io/aglelectronics/suppervisor-web
+    tag: latest
+    pullPolicy: IfNotPresent
+
+replicaCount: 2
+revisionHistoryLimit: 3
+
+database:
+  # Production always uses an external PostgreSQL service.
+  existingSecret: suppervisor-database
+  urlKey: database-url
+
+auth:
+  issuer: https://keycloak.example.com/realms/home
+  clientId: suppervisor
+  # Deliberately rejected by the application when environment=production.
+  devBypass: false
+
+config:
+  environment: production
+  webOrigin: https://suppervisor.example.com
+  ollamaUrl: ""
+  ollamaModel: qwen3:8b
+  telegramMode: webhook
+  telegramWebhookUrl: ""
+
+secrets:
+  existingSecret: suppervisor-secrets
+  telegramTokenKey: telegram-bot-token
+  telegramAllowedUsersKey: telegram-allowed-user-ids
+  telegramWebhookSecretKey: telegram-webhook-secret
+
+ingress:
+  enabled: true
+  className: nginx
+  host: suppervisor.example.com
+  annotations: {}
+  tls:
+    enabled: true
+    secretName: suppervisor-tls
+
+resources:
+  backend:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { cpu: 500m, memory: 256Mi }
+  web:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 96Mi }
+
+ollama:
+  enabled: false
+  image: ollama/ollama:0.12.6
+  model: qwen3:8b
+  persistence:
+    enabled: true
+    size: 30Gi
+    storageClass: ""
+  resources:
+    requests: { cpu: "1", memory: 4Gi }
+    limits: { cpu: "4", memory: 12Gi }
+  gpu:
+    enabled: false
+    resourceName: nvidia.com/gpu
+    count: 1
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
