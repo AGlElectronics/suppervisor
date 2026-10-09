@@ -80,8 +80,6 @@ function App() {
   );
   const [planning, setPlanning] = useState(false);
   const [notice, setNotice] = useState("");
-  const [checked, setChecked] = useState<string[]>([]);
-  const [step, setStep] = useState(0);
   const [ratingOpen, setRatingOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [auth, setAuth] = useState<AuthState>({
@@ -112,16 +110,13 @@ function App() {
       data.decisions[0],
     [data.decisions],
   );
-  useEffect(() => {
-    if (!tonight) return;
-    const persisted = data.workflowStates.find(
-      (state) => state.decisionId === tonight.id,
-    );
-    const local = readLocalWorkflow(tonight.id);
-    const state = offline && local ? local : persisted;
-    setChecked(state?.shoppingChecked ?? []);
-    setStep(state?.cookingStep ?? 0);
-  }, [data.workflowStates, offline, tonight]);
+  const persistedWorkflow = tonight
+    ? data.workflowStates.find((state) => state.decisionId === tonight.id)
+    : undefined;
+  const localWorkflow = tonight ? readLocalWorkflow(tonight.id) : null;
+  const workflow = offline && localWorkflow ? localWorkflow : persistedWorkflow;
+  const checked = workflow?.shoppingChecked ?? [];
+  const step = workflow?.cookingStep ?? 0;
 
   async function makePlan(event: React.FormEvent) {
     event.preventDefault();
@@ -348,7 +343,6 @@ function App() {
               const next = checked.includes(name)
                 ? checked.filter((item) => item !== name)
                 : [...checked, name];
-              setChecked(next);
               void updateWorkflow(next, step);
             }}
           />
@@ -358,7 +352,6 @@ function App() {
             decision={tonight}
             step={step}
             setStep={(next) => {
-              setStep(next);
               void updateWorkflow(checked, next);
             }}
             onFinish={() => {
