@@ -5,7 +5,7 @@ dev:
 
 test:
 	go test ./...
-	cd web && npm test --if-present && npm run lint
+	cd web && npm test && npm run test:migrations && npm run lint
 
 build:
 	go build ./cmd/suppervisor

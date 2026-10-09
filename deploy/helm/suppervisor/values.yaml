@@ -1,11 +1,11 @@
 image:
   backend:
     repository: ghcr.io/aglelectronics/suppervisor
-    tag: latest
+    tag: "0.1.0"
     pullPolicy: IfNotPresent
   web:
     repository: ghcr.io/aglelectronics/suppervisor-web
-    tag: latest
+    tag: "0.1.0"
     pullPolicy: IfNotPresent
 
 replicaCount: 2
