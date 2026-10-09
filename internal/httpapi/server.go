@@ -153,12 +153,16 @@ func (s Server) auth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		header := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		if header == "" || header == r.Header.Get("Authorization") {
+			writeError(w, http.StatusUnauthorized, "valid bearer token required")
+			return
+		}
 		if s.VerifyToken == nil {
 			writeError(w, http.StatusServiceUnavailable, "OIDC verifier unavailable")
 			return
 		}
-		header := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-		if header == "" || header == r.Header.Get("Authorization") || s.VerifyToken(r.Context(), header) != nil {
+		if s.VerifyToken(r.Context(), header) != nil {
 			writeError(w, http.StatusUnauthorized, "valid bearer token required")
 			return
 		}
