@@ -21,6 +21,21 @@ async function audit(page, label) {
     seriousOrCritical: blockers.map((item) => item.id),
   });
   if (blockers.length > 0) {
+    console.error(
+      JSON.stringify(
+        blockers.map((item) => ({
+          id: item.id,
+          help: item.help,
+          nodes: item.nodes.map((node) => ({
+            target: node.target,
+            html: node.html,
+            failure: node.failureSummary,
+          })),
+        })),
+        null,
+        2,
+      ),
+    );
     throw new Error(
       `${label} has serious accessibility violations: ${blockers
         .map((item) => item.id)
