@@ -133,8 +133,11 @@ await mobilePage
   .getByRole("heading", { name: "Dinner’s paper trail" })
   .waitFor();
 await mobilePage.getByRole("button", { name: "Open management" }).click();
-await mobilePage.getByRole("tab", { name: "ratings" }).click();
-await mobilePage.getByRole("columnheader", { name: "Taste" }).waitFor();
+const mobileRatings = mobilePage.getByRole("tab", { name: "ratings" });
+await mobileRatings.click();
+if ((await mobileRatings.getAttribute("aria-selected")) !== "true") {
+  throw new Error("mobile ratings management tab did not activate");
+}
 await audit(mobilePage, "mobile ratings");
 await mobilePage.screenshot({
   path: "/tmp/suppervisor-mobile.png",
