@@ -77,7 +77,12 @@ func (s Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error())
 		return
 	}
-	writeJSON(w, 200, map[string]any{"profiles": profiles, "recipes": recipes, "decisions": decisions, "preferenceEvents": events})
+	ratings, err := s.Store.Ratings(r.Context())
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, map[string]any{"profiles": profiles, "recipes": recipes, "decisions": decisions, "preferenceEvents": events, "ratings": ratings})
 }
 
 func (s Server) plan(w http.ResponseWriter, r *http.Request) {

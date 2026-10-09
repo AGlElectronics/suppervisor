@@ -300,6 +300,23 @@ func (p *Postgres) PreferenceEvents(ctx context.Context) ([]domain.PreferenceEve
 	return out, rows.Err()
 }
 
+func (p *Postgres) Ratings(ctx context.Context) ([]domain.Rating, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT decision_id,profile_id,overall,taste,ease,reheat,tags,notes FROM ratings ORDER BY created_at DESC LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.Rating
+	for rows.Next() {
+		var rating domain.Rating
+		if err := rows.Scan(&rating.DecisionID, &rating.ProfileID, &rating.Overall, &rating.Taste, &rating.Ease, &rating.Reheat, &rating.Tags, &rating.Notes); err != nil {
+			return nil, err
+		}
+		out = append(out, rating)
+	}
+	return out, rows.Err()
+}
+
 func newID() string {
 	var value [16]byte
 	_, _ = rand.Read(value[:])
