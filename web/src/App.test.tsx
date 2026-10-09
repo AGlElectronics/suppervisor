@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { demoData } from "./api";
 
 describe("Suppervisor PWA", () => {
   beforeEach(() => {
@@ -102,5 +103,53 @@ describe("Suppervisor PWA", () => {
       }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+  });
+
+  it("shows every candidate from the latest ranked planning batch", async () => {
+    const candidates = ["Bean supper", "Lentil supper", "Chickpea supper"].map(
+      (title, index) => ({
+        ...demoData.decisions[0],
+        id: `new-${index}`,
+        candidate: {
+          ...demoData.decisions[0].candidate,
+          id: `recipe-${index}`,
+          title,
+        },
+        status: "proposed" as const,
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/public/config")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ authRequired: false }), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
+        const body = url.endsWith("/plans")
+          ? { decisions: candidates }
+          : demoData;
+        return Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }),
+    );
+    render(<App />);
+    await screen.findByRole("heading", {
+      name: "What should dinner do for you?",
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Find dinner" }));
+    for (const title of ["Bean supper", "Lentil supper", "Chickpea supper"]) {
+      expect(
+        await screen.findByRole("heading", { name: title }),
+      ).toBeInTheDocument();
+    }
   });
 });
