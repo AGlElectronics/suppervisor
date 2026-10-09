@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "cursor/**"
+  pull_request:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOFLAGS: -mod=readonly
+
+jobs:
+  workflows:
+    name: GitHub Actions lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Run actionlint
+        run: docker run --rm -v "$PWD:/repo" rhysd/actionlint:1.7.7
+
+  go:
+    name: Go test and vet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check formatting
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Test
+        run: go test -race -coverprofile=coverage.out ./...
+      - name: Vet
+        run: go vet ./...
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: go-coverage
+          path: coverage.out
+          if-no-files-found: warn
+
+  web:
+    name: Web test, lint, and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run test:migrations
+      - run: npm run lint
+      - run: npm run build
+
+  migrations:
+    name: Reversible migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./internal/store -run TestEveryMigrationIsReversible -count=1
+
+  postgres:
+    name: PostgreSQL integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: suppervisor_test
+          POSTGRES_USER: suppervisor
+          POSTGRES_PASSWORD: integration-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U suppervisor -d suppervisor_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgres://suppervisor:integration-only@localhost:5432/suppervisor_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -race ./internal/store -run TestPostgresIntegrationLifecycle -count=1
+
+  deployment:
+    name: Compose and Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
+        with:
+          version: v3.18.6
+      - name: Install kubeconform
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz |
+            sudo tar -xz -C /usr/local/bin kubeconform
+      - name: Validate Compose
+        run: docker compose config --quiet
+      - name: Lint chart
+        run: helm lint deploy/helm/suppervisor --strict
+      - name: Render and validate chart
+        run: |
+          helm template suppervisor deploy/helm/suppervisor \
+            --set image.backend.tag="$GITHUB_SHA" \
+            --set image.web.tag="$GITHUB_SHA" > rendered.yaml
+          kubeconform -strict -summary -ignore-missing-schemas rendered.yaml
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rendered-kubernetes-manifests
+          path: rendered.yaml

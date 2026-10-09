@@ -111,6 +111,8 @@ Migrations live in `internal/store/migrations`. Every migration must include non
 
 ## Production
 
-The Helm chart under `deploy/helm/suppervisor` targets Kubernetes/Talos and expects external PostgreSQL plus existing Kubernetes Secrets. Application containers run non-root with read-only root filesystems, health probes, resource limits, dropped capabilities, short-lived migration Jobs, and graceful termination. Serving processes only verify schema state; they do not need migration DDL privileges. Optional in-cluster Ollama has PVC and GPU controls. Production rendering rejects empty or `latest` application image tags; deploy commit-SHA or immutable release tags, overriding the repositories with `$CI_REGISTRY_IMAGE` and `$CI_REGISTRY_IMAGE/web`.
+The Helm chart under `deploy/helm/suppervisor` targets Kubernetes/Talos and expects external PostgreSQL plus existing Kubernetes Secrets. Application containers run non-root with read-only root filesystems, health probes, resource limits, dropped capabilities, short-lived migration Jobs, and graceful termination. Serving processes only verify schema state; they do not need migration DDL privileges. Optional in-cluster Ollama has PVC and GPU controls. Production rendering rejects empty or `latest` application image tags; deploy commit-SHA or immutable release tags.
+
+GitHub Actions publishes semver-tagged images to `ghcr.io/aglelectronics/suppervisor` and `ghcr.io/aglelectronics/suppervisor/web` only after the CI and security gates pass and the tagged commit is verified on `main`. Protect the `ghcr-release` GitHub environment with required reviewers to add an approval gate before publication.
 
 See [Talos deployment notes](docs/talos-deployment.md) and [architecture](docs/architecture.md).
