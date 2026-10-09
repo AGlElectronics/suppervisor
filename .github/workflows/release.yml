@@ -65,6 +65,8 @@ jobs:
           push: true
           provenance: mode=max
           sbom: true
+          build-args: |
+            GO_IMAGE=public.ecr.aws/docker/library/golang:1.26-alpine
           tags: |
             ${{ steps.images.outputs.backend }}:${{ github.ref_name }}
             ${{ steps.images.outputs.backend }}:${{ github.sha }}
@@ -75,6 +77,9 @@ jobs:
           push: true
           provenance: mode=max
           sbom: true
+          build-args: |
+            NODE_IMAGE=public.ecr.aws/docker/library/node:24-alpine
+            NGINX_IMAGE=public.ecr.aws/nginx/nginx-unprivileged:1.29-alpine
           tags: |
             ${{ steps.images.outputs.web }}:${{ github.ref_name }}
             ${{ steps.images.outputs.web }}:${{ github.sha }}
