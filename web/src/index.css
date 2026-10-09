@@ -109,6 +109,8 @@ code,
 :root {
   --tomato: #c94b35;
   --tomato-deep: #9f3526;
+  --action: #a63a29;
+  --action-hover: #8f2f21;
   --herb: #557158;
   --cream: #fbf4e8;
   --cream-deep: #f0e2ce;
@@ -140,6 +142,8 @@ code,
   --cream-deep: #3c3a30;
   --tomato: #ed745c;
   --tomato-deep: #f58b74;
+  --action: #983626;
+  --action-hover: #7f2b1f;
   --herb: #8dab8c;
   color-scheme: dark;
 }
@@ -235,7 +239,7 @@ p {
   display: grid;
   place-items: center;
   border-radius: 14px;
-  background: var(--tomato);
+  background: var(--action);
   color: white;
   box-shadow: 0 8px 20px rgba(160, 53, 38, 0.22);
 }
@@ -399,11 +403,11 @@ select {
 }
 .primary-button {
   color: white;
-  background: var(--tomato);
+  background: var(--action);
   box-shadow: 0 8px 18px rgba(160, 53, 38, 0.18);
 }
 .primary-button:hover {
-  background: var(--tomato-deep);
+  background: var(--action-hover);
 }
 .secondary-button {
   color: var(--ink);
@@ -826,8 +830,8 @@ button:disabled {
 }
 .manage-tabs [role="tab"][data-state="active"] {
   color: white;
-  background: var(--tomato);
-  border-color: var(--tomato);
+  background: var(--action);
+  border-color: var(--action);
 }
 .manage-tabs [role="tabpanel"] {
   margin-top: 12px;
