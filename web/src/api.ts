@@ -183,6 +183,7 @@ export const demoData: Bootstrap = {
         maxMinutes: 35,
         maxCostPence: 1200,
         available: [],
+        assumptions: ["standard hob and oven available"],
       },
       candidate: {
         id: "tomato-lentil-orzo",
