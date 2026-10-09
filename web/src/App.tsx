@@ -15,6 +15,8 @@ import {
   Heart,
   History,
   ListChecks,
+  LogIn,
+  LogOut,
   Moon,
   PackageCheck,
   PoundSterling,
@@ -36,6 +38,7 @@ import {
   type Decision,
   type Rating,
 } from "./api";
+import { initialiseAuth, login, logout, type AuthState } from "./auth";
 import { brand } from "./brand";
 
 type Screen =
@@ -70,17 +73,28 @@ function App() {
   const [checked, setChecked] = useState<string[]>([]);
   const [step, setStep] = useState(0);
   const [ratingOpen, setRatingOpen] = useState(false);
+  const [adjustOpen, setAdjustOpen] = useState(false);
+  const [auth, setAuth] = useState<AuthState>({
+    ready: false,
+    required: false,
+    user: null,
+    error: "",
+  });
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
     localStorage.setItem("suppervisor-theme", dark ? "dark" : "light");
   }, [dark]);
   useEffect(() => {
+    initialiseAuth().then(setAuth);
+  }, []);
+  useEffect(() => {
+    if (!auth.ready || (auth.required && !auth.user)) return;
     api
       .bootstrap()
       .then(setData)
       .catch(() => setOffline(true));
-  }, []);
+  }, [auth.ready, auth.required, auth.user]);
   const tonight = useMemo(
     () =>
       data.decisions.find((d) => d.status === "accepted") ??
@@ -141,6 +155,11 @@ function App() {
     }
   }
 
+  if (!auth.ready) return <AuthLoading />;
+  if (auth.required && !auth.user) {
+    return <LoginScreen error={auth.error} onLogin={() => login()} />;
+  }
+
   return (
     <div className="min-h-dvh bg-canvas text-ink">
       <aside className="sidebar">
@@ -167,6 +186,12 @@ function App() {
             <Settings2 size={19} />
             <span>Manage</span>
           </button>
+          {auth.user && (
+            <button className="nav-item" onClick={() => logout()}>
+              <LogOut size={19} />
+              <span>Sign out</span>
+            </button>
+          )}
           <div className="theme-row">
             <Sun size={16} />
             <span>Kitchen light</span>
@@ -184,13 +209,31 @@ function App() {
       </aside>
       <header className="mobile-header">
         <BrandMark compact />
-        <button
-          className="icon-button"
-          onClick={() => setDark((value) => !value)}
-          aria-label="Toggle colour theme"
-        >
-          {dark ? <Sun size={20} /> : <Moon size={20} />}
-        </button>
+        <div className="mobile-actions">
+          <button
+            className="icon-button"
+            onClick={() => setScreen("manage")}
+            aria-label="Open management"
+          >
+            <Settings2 size={20} />
+          </button>
+          <button
+            className="icon-button"
+            onClick={() => setDark((value) => !value)}
+            aria-label="Toggle colour theme"
+          >
+            {dark ? <Sun size={20} /> : <Moon size={20} />}
+          </button>
+          {auth.user && (
+            <button
+              className="icon-button"
+              onClick={() => logout()}
+              aria-label="Sign out"
+            >
+              <LogOut size={20} />
+            </button>
+          )}
+        </div>
       </header>
       <main className="main-shell">
         {offline && (
@@ -216,11 +259,7 @@ function App() {
             onPlan={makePlan}
             onAccept={() => updateDecision("accepted")}
             onReject={() => updateDecision("rejected")}
-            onAdjust={() => {
-              const correction = window.prompt("What should change?");
-              if (correction?.trim())
-                updateDecision("adjusted", correction.trim());
-            }}
+            onAdjust={() => setAdjustOpen(true)}
             onOpen={() => setScreen("recipe")}
           />
         )}
@@ -280,7 +319,7 @@ function App() {
         )}
       </main>
       <nav className="mobile-nav" aria-label="Mobile navigation">
-        {navigation.slice(0, 5).map(({ id, label, icon: Icon }) => (
+        {navigation.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             aria-current={screen === id ? "page" : undefined}
@@ -292,21 +331,143 @@ function App() {
         ))}
       </nav>
       {tonight && (
-        <RatingDialog
-          open={ratingOpen}
-          onOpenChange={setRatingOpen}
-          decision={tonight}
-          profiles={data.profiles}
-          offline={offline}
-          onSaved={(events) =>
-            setData((current) => ({
-              ...current,
-              preferenceEvents: [...events, ...current.preferenceEvents],
-            }))
-          }
-        />
+        <>
+          <AdjustmentDialog
+            open={adjustOpen}
+            onOpenChange={setAdjustOpen}
+            onSave={(correction) => updateDecision("adjusted", correction)}
+          />
+          <RatingDialog
+            open={ratingOpen}
+            onOpenChange={setRatingOpen}
+            decision={tonight}
+            profiles={data.profiles}
+            offline={offline}
+            onSaved={(events, rating) =>
+              setData((current) => ({
+                ...current,
+                preferenceEvents: [...events, ...current.preferenceEvents],
+                ratings: [
+                  rating,
+                  ...current.ratings.filter(
+                    (item) =>
+                      item.decisionId !== rating.decisionId ||
+                      item.profileId !== rating.profileId,
+                  ),
+                ],
+              }))
+            }
+          />
+        </>
       )}
     </div>
+  );
+}
+
+function AuthLoading() {
+  return (
+    <main className="auth-shell" aria-busy="true">
+      <BrandMark />
+      <p>Setting the table…</p>
+    </main>
+  );
+}
+
+function LoginScreen({
+  error,
+  onLogin,
+}: {
+  error: string;
+  onLogin: () => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [loginError, setLoginError] = useState(error);
+  return (
+    <main className="auth-shell">
+      <BrandMark />
+      <div>
+        <span className="eyebrow">Private kitchen</span>
+        <h1>Come in. Dinner’s waiting.</h1>
+        <p>Sign in through the household Keycloak to open Suppervisor.</p>
+      </div>
+      {(loginError || error) && (
+        <p className="warning" role="alert">
+          {loginError || error}
+        </p>
+      )}
+      <button
+        className="primary-button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setLoginError("");
+          try {
+            await onLogin();
+          } catch (loginFailure) {
+            setLoginError(
+              loginFailure instanceof Error
+                ? loginFailure.message
+                : "Sign-in could not start",
+            );
+            setBusy(false);
+          }
+        }}
+      >
+        <LogIn size={18} />
+        {busy ? "Opening Keycloak…" : "Sign in"}
+      </button>
+    </main>
+  );
+}
+
+function AdjustmentDialog({
+  open,
+  onOpenChange,
+  onSave,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (correction: string) => void;
+}) {
+  const [correction, setCorrection] = useState("");
+  return (
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay" />
+        <Dialog.Content className="dialog-content">
+          <Dialog.Title>What should change?</Dialog.Title>
+          <Dialog.Description>
+            Keep the useful parts and leave a correction we can inspect later.
+          </Dialog.Description>
+          <label>
+            Adjustment
+            <textarea
+              autoFocus
+              value={correction}
+              onChange={(event) => setCorrection(event.target.value)}
+              placeholder="Less spicy, or swap the oven for the hob…"
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <Dialog.Close className="secondary-button">Cancel</Dialog.Close>
+            <button
+              className="primary-button"
+              disabled={!correction.trim()}
+              onClick={() => {
+                onSave(correction.trim());
+                setCorrection("");
+                onOpenChange(false);
+              }}
+            >
+              Save adjustment
+            </button>
+          </div>
+          <Dialog.Close className="dialog-x" aria-label="Close">
+            <X />
+          </Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 
@@ -449,7 +610,7 @@ function CandidateCard({
         </span>
         <span>
           <PackageCheck />
-          Great reheated
+          {recipe.reheatsWell ? "Great reheated" : "Best eaten fresh"}
         </span>
       </div>
       {decision.violations.length > 0 && (
@@ -458,6 +619,25 @@ function CandidateCard({
           {decision.violations.join(" · ")}
         </div>
       )}
+      <details className="score-details">
+        <summary>Why this fits</summary>
+        <dl>
+          {Object.entries(decision.score)
+            .filter(([key]) => key !== "total")
+            .map(([key, value]) => (
+              <div key={key}>
+                <dt>{key}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+        </dl>
+        {(decision.request.assumptions?.length ?? 0) > 0 && (
+          <p>
+            Assumed: {decision.request.assumptions?.join(" · ")}. Adjust if
+            that’s wrong.
+          </p>
+        )}
+      </details>
       <div className="mt-6 flex flex-wrap gap-2">
         <button className="primary-button" onClick={onAccept}>
           <Check size={18} />
@@ -511,6 +691,30 @@ function Recipe({
             Open shopping
           </button>
         </section>
+        <section className="panel prep-panel">
+          <span className="eyebrow">Prep first</span>
+          <h2>Five calm minutes before the heat</h2>
+          <ul className="prep-list">
+            {candidate.ingredients.slice(0, 4).map((item) => (
+              <li key={item.name}>
+                <Check size={16} />
+                <span>
+                  Measure {item.quantity} {item.unit} {item.name}; drain, rinse,
+                  or chop as needed.
+                </span>
+              </li>
+            ))}
+            {decision.request.lunchPortions > 0 && (
+              <li>
+                <PackageCheck size={16} />
+                <span>
+                  Set out containers for {decision.request.lunchPortions} lunch
+                  portions.
+                </span>
+              </li>
+            )}
+          </ul>
+        </section>
         <section className="panel">
           <h2>The game plan</h2>
           <ol className="step-list">
@@ -544,7 +748,12 @@ function Shopping({
   onToggle: (name: string) => void;
 }) {
   if (!decision) return <Empty />;
-  const items = decision.candidate.ingredients;
+  const pantry = new Set(
+    (decision.request.available ?? []).map((item) => item.trim().toLowerCase()),
+  );
+  const items = decision.candidate.ingredients.filter(
+    (item) => !pantry.has(item.name.trim().toLowerCase()),
+  );
   const complete = items.length ? (checked.length / items.length) * 100 : 0;
   return (
     <div>
@@ -827,9 +1036,19 @@ function Management({
               rows={data.ratings.map((r) => [
                 r.profileId,
                 `${r.overall}/5`,
+                `${r.taste}/5`,
+                `${r.ease}/5`,
+                `${r.reheat}/5`,
                 r.notes,
               ])}
-              headings={["Profile", "Overall", "Notes"]}
+              headings={[
+                "Profile",
+                "Overall",
+                "Taste",
+                "Ease",
+                "Reheat",
+                "Notes",
+              ]}
             />
           ) : (
             <Empty compact />
@@ -953,26 +1172,32 @@ function RatingDialog({
   decision: Decision;
   profiles: Bootstrap["profiles"];
   offline: boolean;
-  onSaved: (events: Bootstrap["preferenceEvents"]) => void;
+  onSaved: (events: Bootstrap["preferenceEvents"], rating: Rating) => void;
 }) {
   const [profileId, setProfileId] = useState(profiles[0]?.id ?? "alan");
   const [overall, setOverall] = useState(4);
+  const [taste, setTaste] = useState(4);
+  const [ease, setEase] = useState(4);
+  const [reheat, setReheat] = useState(4);
+  const [tags, setTags] = useState<string[]>([]);
   const [notes, setNotes] = useState("");
   async function save() {
     const rating: Rating = {
       decisionId: decision.id,
       profileId,
       overall,
-      taste: overall,
-      ease: overall,
-      reheat: overall,
-      tags: [],
+      taste,
+      ease,
+      reheat,
+      tags,
       notes,
     };
+    let events: Bootstrap["preferenceEvents"] = [];
     if (!offline) {
       const result = await api.rate(rating);
-      onSaved(result.preferenceEvents);
+      events = result.preferenceEvents;
     }
+    onSaved(events, rating);
     onOpenChange(false);
   }
   return (
@@ -997,18 +1222,34 @@ function RatingDialog({
               ))}
             </select>
           </label>
+          <div className="rating-grid">
+            <ScoreInput label="Overall" value={overall} onChange={setOverall} />
+            <ScoreInput label="Taste" value={taste} onChange={setTaste} />
+            <ScoreInput label="Ease" value={ease} onChange={setEase} />
+            <ScoreInput label="Reheating" value={reheat} onChange={setReheat} />
+          </div>
           <fieldset>
-            <legend>Overall</legend>
-            <div className="star-row">
-              {[1, 2, 3, 4, 5].map((v) => (
-                <button
-                  key={v}
-                  onClick={() => setOverall(v)}
-                  aria-label={`${v} stars`}
-                >
-                  <Star fill={v <= overall ? "currentColor" : "none"} />
-                </button>
-              ))}
+            <legend>Quick notes</legend>
+            <div className="tag-row">
+              {["make again", "too fussy", "great lunch", "needs crunch"].map(
+                (tag) => (
+                  <button
+                    type="button"
+                    className={tags.includes(tag) ? "positive-tag" : "chip"}
+                    aria-pressed={tags.includes(tag)}
+                    key={tag}
+                    onClick={() =>
+                      setTags((current) =>
+                        current.includes(tag)
+                          ? current.filter((item) => item !== tag)
+                          : [...current, tag],
+                      )
+                    }
+                  >
+                    {tag}
+                  </button>
+                ),
+              )}
             </div>
           </fieldset>
           <label>
@@ -1031,6 +1272,35 @@ function RatingDialog({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+function ScoreInput({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <fieldset>
+      <legend>{label}</legend>
+      <div className="star-row">
+        {[1, 2, 3, 4, 5].map((score) => (
+          <button
+            type="button"
+            key={score}
+            onClick={() => onChange(score)}
+            aria-label={`${label}: ${score} out of 5`}
+            aria-pressed={score === value}
+          >
+            <Star fill={score <= value ? "currentColor" : "none"} />
+          </button>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 function Empty({ compact = false }: { compact?: boolean }) {

@@ -38,6 +38,7 @@ export type Decision = {
     lunchPortions: number;
     maxMinutes: number;
     maxCostPence: number;
+    available?: string[];
     assumptions?: string[];
   };
   candidate: Candidate;
@@ -181,6 +182,7 @@ export const demoData: Bootstrap = {
         lunchPortions: 2,
         maxMinutes: 35,
         maxCostPence: 1200,
+        available: [],
       },
       candidate: {
         id: "tomato-lentil-orzo",

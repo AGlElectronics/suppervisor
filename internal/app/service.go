@@ -81,6 +81,14 @@ func (s Service) Rate(ctx context.Context, rating domain.Rating) ([]domain.Prefe
 		rating.Ease < 1 || rating.Ease > 5 || rating.Reheat < 1 || rating.Reheat > 5 {
 		return nil, errors.New("every rating dimension must be between 1 and 5")
 	}
+	if len(rating.Tags) > 8 {
+		return nil, errors.New("a rating may include at most eight tags")
+	}
+	for _, tag := range rating.Tags {
+		if len(strings.TrimSpace(tag)) == 0 || len(tag) > 40 {
+			return nil, errors.New("rating tags must contain 1 to 40 characters")
+		}
+	}
 	decisions, err := s.Store.Decisions(ctx, 100)
 	if err != nil {
 		return nil, err

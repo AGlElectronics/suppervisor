@@ -353,15 +353,31 @@ func (p *Postgres) SaveRating(ctx context.Context, rating domain.Rating, candida
 			return nil, err
 		}
 	}
-	delta := float64(rating.Overall-3) * .25
 	var events []domain.PreferenceEvent
-	for _, tag := range candidate.Tags {
-		event := domain.PreferenceEvent{ID: newID(), ProfileID: rating.ProfileID, Key: strings.ToLower(tag), Delta: delta, Reason: fmt.Sprintf("rating %d/5 for %s", rating.Overall, candidate.Title), CreatedAt: time.Now().UTC()}
+	record := func(key string, delta float64, reason string) error {
+		event := domain.PreferenceEvent{ID: newID(), ProfileID: rating.ProfileID, Key: strings.ToLower(key), Delta: delta, Reason: reason, CreatedAt: time.Now().UTC()}
 		_, err = tx.Exec(ctx, `INSERT INTO preference_events(id,profile_id,key,delta,reason,rating_id) VALUES($1,$2,$3,$4,$5,$6)`, event.ID, event.ProfileID, event.Key, event.Delta, event.Reason, ratingID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		events = append(events, event)
+		return nil
+	}
+	for _, tag := range candidate.Tags {
+		if err := record(tag, float64(rating.Taste-3)*.25, fmt.Sprintf("taste rating %d/5 for %s", rating.Taste, candidate.Title)); err != nil {
+			return nil, err
+		}
+	}
+	if err := record("ease", float64(rating.Ease-3)*.2, fmt.Sprintf("ease rating %d/5 for %s", rating.Ease, candidate.Title)); err != nil {
+		return nil, err
+	}
+	if err := record("reheat", float64(rating.Reheat-3)*.2, fmt.Sprintf("reheat rating %d/5 for %s", rating.Reheat, candidate.Title)); err != nil {
+		return nil, err
+	}
+	for _, tag := range rating.Tags {
+		if err := record("feedback:"+tag, float64(rating.Overall-3)*.15, fmt.Sprintf("feedback tag for %s", candidate.Title)); err != nil {
+			return nil, err
+		}
 	}
 	if err = refreshPreferences(ctx, tx, rating.ProfileID); err != nil {
 		return nil, err
