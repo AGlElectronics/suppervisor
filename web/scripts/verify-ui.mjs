@@ -66,6 +66,12 @@ await page.getByRole("heading", { name: /Five calm minutes/ }).waitFor();
 await page.getByRole("button", { name: /Open shopping/ }).click();
 await page.getByRole("checkbox", { name: /orzo/i }).check();
 await page.getByText(/1 of 5 tucked into the basket/).waitFor();
+await page.reload({ waitUntil: "networkidle" });
+await page.getByRole("button", { name: "Shopping" }).first().click();
+await page.getByRole("checkbox", { name: /orzo/i }).waitFor();
+if (!(await page.getByRole("checkbox", { name: /orzo/i }).isChecked())) {
+  throw new Error("shopping progress did not survive reload");
+}
 await page.getByRole("button", { name: "Cooking" }).first().click();
 await page.getByRole("button", { name: /Next step/ }).click();
 await page.getByRole("button", { name: /Next step/ }).click();

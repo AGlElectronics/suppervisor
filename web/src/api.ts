@@ -88,11 +88,19 @@ export type Rating = {
   notes: string;
 };
 
+export type WorkflowState = {
+  decisionId: string;
+  shoppingChecked: string[];
+  cookingStep: number;
+  updatedAt: string;
+};
+
 export type Bootstrap = {
   profiles: Profile[];
   recipes: Candidate[];
   decisions: Decision[];
   decisionEvents: DecisionEvent[];
+  workflowStates: WorkflowState[];
   preferenceEvents: PreferenceEvent[];
   ratings: Rating[];
 };
@@ -131,6 +139,11 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status, correction }),
     }),
+  setWorkflow: (id: string, shoppingChecked: string[], cookingStep: number) =>
+    request<WorkflowState>(`/decisions/${id}/workflow`, {
+      method: "PATCH",
+      body: JSON.stringify({ shoppingChecked, cookingStep }),
+    }),
   rate: (rating: Rating) =>
     request<{ preferenceEvents: PreferenceEvent[] }>("/ratings", {
       method: "POST",
@@ -167,6 +180,14 @@ export const demoData: Bootstrap = {
       actor: "demo",
       detail: { note: "development-only accepted meal" },
       createdAt: new Date().toISOString(),
+    },
+  ],
+  workflowStates: [
+    {
+      decisionId: "demo-tonight",
+      shoppingChecked: [],
+      cookingStep: 0,
+      updatedAt: new Date().toISOString(),
     },
   ],
   preferenceEvents: [],

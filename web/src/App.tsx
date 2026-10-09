@@ -37,6 +37,7 @@ import {
   type Bootstrap,
   type Decision,
   type Rating,
+  type WorkflowState,
 } from "./api";
 import { initialiseAuth, login, logout, type AuthState } from "./auth";
 import { brand } from "./brand";
@@ -57,6 +58,15 @@ const navigation = [
   { id: "profile", label: "Profile", icon: UserRound },
   { id: "history", label: "History", icon: History },
 ] satisfies { id: Screen; label: string; icon: typeof Sparkles }[];
+
+function readLocalWorkflow(decisionId: string): WorkflowState | null {
+  try {
+    const value = localStorage.getItem(`suppervisor-workflow:${decisionId}`);
+    return value ? (JSON.parse(value) as WorkflowState) : null;
+  } catch {
+    return null;
+  }
+}
 
 function App() {
   const [screen, setScreen] = useState<Screen>("tonight");
@@ -102,6 +112,16 @@ function App() {
       data.decisions[0],
     [data.decisions],
   );
+  useEffect(() => {
+    if (!tonight) return;
+    const persisted = data.workflowStates.find(
+      (state) => state.decisionId === tonight.id,
+    );
+    const local = readLocalWorkflow(tonight.id);
+    const state = offline && local ? local : persisted;
+    setChecked(state?.shoppingChecked ?? []);
+    setStep(state?.cookingStep ?? 0);
+  }, [data.workflowStates, offline, tonight]);
 
   async function makePlan(event: React.FormEvent) {
     event.preventDefault();
@@ -152,6 +172,53 @@ function App() {
       );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : brand.voice.error);
+    }
+  }
+
+  async function updateWorkflow(
+    shoppingChecked: string[],
+    cookingStep: number,
+  ) {
+    if (!tonight) return;
+    const optimistic = {
+      decisionId: tonight.id,
+      shoppingChecked,
+      cookingStep,
+      updatedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(
+      `suppervisor-workflow:${tonight.id}`,
+      JSON.stringify(optimistic),
+    );
+    setData((current) => ({
+      ...current,
+      workflowStates: [
+        optimistic,
+        ...current.workflowStates.filter(
+          (state) => state.decisionId !== tonight.id,
+        ),
+      ],
+    }));
+    if (offline) return;
+    try {
+      const saved = await api.setWorkflow(
+        tonight.id,
+        shoppingChecked,
+        cookingStep,
+      );
+      setData((current) => ({
+        ...current,
+        workflowStates: [
+          saved,
+          ...current.workflowStates.filter(
+            (state) => state.decisionId !== tonight.id,
+          ),
+        ],
+      }));
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Couldn’t save progress",
+      );
     }
   }
 
@@ -277,20 +344,23 @@ function App() {
           <Shopping
             decision={tonight}
             checked={checked}
-            onToggle={(name) =>
-              setChecked((items) =>
-                items.includes(name)
-                  ? items.filter((item) => item !== name)
-                  : [...items, name],
-              )
-            }
+            onToggle={(name) => {
+              const next = checked.includes(name)
+                ? checked.filter((item) => item !== name)
+                : [...checked, name];
+              setChecked(next);
+              void updateWorkflow(next, step);
+            }}
           />
         )}
         {screen === "cooking" && (
           <Cooking
             decision={tonight}
             step={step}
-            setStep={setStep}
+            setStep={(next) => {
+              setStep(next);
+              void updateWorkflow(checked, next);
+            }}
             onFinish={() => {
               updateDecision("cooked");
               setRatingOpen(true);
