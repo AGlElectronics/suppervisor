@@ -12,7 +12,7 @@ Suppervisor is a standalone, local-first dinner assistant for Alan and Partner. 
 - Enforces portions, lunch leftovers, reheating, time, cost, equipment, ingredients, and diner dislikes as hard constraints.
 - Scores preference fit, speed, price, leftovers, available ingredients, and recent-meal novelty deterministically.
 - Records accept, reject, adjust, cook, corrections, ratings, and reversible preference events.
-- Produces shopping lists and a focused step-by-step cooking view.
+- Produces shopping lists and a focused step-by-step cooking view, with resumable shopping and cooking progress.
 - Supports Telegram polling or signed webhooks with a mandatory user allowlist.
 - Provides management views for profiles, preferences, meals, ratings, recipes, decisions, runtime status, and corrections.
 

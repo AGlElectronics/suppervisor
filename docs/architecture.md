@@ -30,6 +30,8 @@ Profiles contain explicit likes, hard dislikes, baseline preference weights, and
 
 Recipe bodies, requests, scores, and violations are stored as JSONB so iteration-one schemas can evolve while decision metadata remains queryable. Each proposal stores an immutable recipe snapshot, and status/correction changes append to `decision_events`. Every accepted or cooked decision participates in recent-meal novelty scoring.
 
+`workflow_states` stores checked shopping items and cooking-step progress per decision for cross-device resume. The PWA mirrors this small state to local storage so an interrupted offline demo also resumes without pretending it reached PostgreSQL.
+
 ## Generation failure policy
 
 Ollama receives a JSON-only schema request. Missing or malformed candidate fields cause one corrective retry containing the validation error. Transport errors fail the request visibly. When Ollama is deliberately unconfigured in development, a deterministic candidate provider keeps the complete workflow runnable; production should configure Ollama.
