@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -198,7 +197,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
-	if errors.Is(context.Canceled, context.Canceled) && message == "" {
+	if message == "" {
 		message = "request failed"
 	}
 	writeJSON(w, status, map[string]string{"error": message})

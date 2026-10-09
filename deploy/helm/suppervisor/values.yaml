@@ -24,6 +24,7 @@ auth:
 
 config:
   environment: production
+  devDemoData: false
   webOrigin: https://suppervisor.example.com
   ollamaUrl: ""
   ollamaModel: qwen3:8b

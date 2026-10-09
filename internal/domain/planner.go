@@ -40,8 +40,13 @@ func (Planner) Validate(req PlanRequest, c Candidate, profiles []Profile, recent
 		}
 	}
 	for _, ingredient := range c.Ingredients {
-		if containsFold(avoids, ingredient.Name) {
-			violations = append(violations, "contains avoided ingredient: "+ingredient.Name)
+		for _, avoid := range avoids {
+			name := strings.ToLower(strings.TrimSpace(ingredient.Name))
+			excluded := strings.ToLower(strings.TrimSpace(avoid))
+			if excluded != "" && (strings.Contains(name, excluded) || strings.Contains(excluded, name)) {
+				violations = append(violations, "contains avoided ingredient: "+ingredient.Name)
+				break
+			}
 		}
 	}
 	sort.Strings(violations)

@@ -6,6 +6,7 @@ metadata:
 data:
   APP_ENV: {{ .Values.config.environment | quote }}
   AUTH_DEV_BYPASS: {{ .Values.auth.devBypass | quote }}
+  DEV_DEMO_DATA: {{ .Values.config.devDemoData | quote }}
   OIDC_ISSUER: {{ .Values.auth.issuer | quote }}
   OIDC_CLIENT_ID: {{ .Values.auth.clientId | quote }}
   WEB_ORIGIN: {{ .Values.config.webOrigin | quote }}

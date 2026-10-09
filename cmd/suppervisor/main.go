@@ -61,6 +61,12 @@ func run(logger *slog.Logger) error {
 		logger.Info("migrations complete")
 		return nil
 	}
+	if cfg.DevDemoData {
+		if err := db.SeedDemo(rootCtx); err != nil {
+			return err
+		}
+		logger.Info("development demo data ready")
+	}
 
 	var provider llm.Provider
 	if cfg.OllamaURL != "" {

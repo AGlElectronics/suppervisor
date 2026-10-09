@@ -65,6 +65,7 @@ The Vite server runs on <http://localhost:4179> and proxies `/api` to port `8091
 | `OLLAMA_URL` | empty | Ollama base URL; empty enables deterministic development candidates |
 | `OLLAMA_MODEL` | `qwen3:8b` | local generation model |
 | `AUTH_DEV_BYPASS` | `true` | skips OIDC only outside production |
+| `DEV_DEMO_DATA` | `true` | seeds an accepted sample meal outside production |
 | `OIDC_ISSUER` | empty | Keycloak realm issuer; required in production |
 | `OIDC_CLIENT_ID` | `suppervisor` | expected ID-token audience |
 | `TELEGRAM_MODE` | `polling` | `polling` or `webhook` |

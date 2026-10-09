@@ -100,6 +100,21 @@ func (p *Postgres) Migrate(ctx context.Context) error {
 	return nil
 }
 
+func (p *Postgres) SeedDemo(ctx context.Context) error {
+	_, err := p.Pool.Exec(ctx, `INSERT INTO decisions(id,request,recipe_id,score,violations,status,correction,created_at)
+		VALUES(
+			'00000000-0000-4000-8000-000000000001',
+			'{"text":"Something cosy under 35 minutes, with two lunches","diners":["alan","partner"],"servings":2,"lunchPortions":2,"maxMinutes":35,"maxCostPence":1200,"equipment":["hob","oven"],"requireReheating":true}',
+			'known-winner-tomato-orzo',
+			'{"preference":32,"time":17,"cost":13,"leftovers":10,"novelty":9,"ingredients":11,"total":92}',
+			'[]',
+			'accepted',
+			'',
+			now() - interval '1 day'
+		) ON CONFLICT(id) DO NOTHING`)
+	return err
+}
+
 func SplitMigration(sql string) (up, down string, err error) {
 	const upMark, downMark = "-- +suppervisor Up", "-- +suppervisor Down"
 	upAt, downAt := strings.Index(sql, upMark), strings.Index(sql, downMark)
@@ -231,10 +246,14 @@ func (p *Postgres) SaveRating(ctx context.Context, rating domain.Rating, candida
 	defer tx.Rollback(ctx)
 	ratingID := newID()
 	tags, _ := json.Marshal(rating.Tags)
-	_, err = tx.Exec(ctx, `INSERT INTO ratings(id,decision_id,profile_id,overall,taste,ease,reheat,tags,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		ON CONFLICT(decision_id,profile_id) DO UPDATE SET overall=EXCLUDED.overall,taste=EXCLUDED.taste,ease=EXCLUDED.ease,reheat=EXCLUDED.reheat,tags=EXCLUDED.tags,notes=EXCLUDED.notes`,
-		ratingID, rating.DecisionID, rating.ProfileID, rating.Overall, rating.Taste, rating.Ease, rating.Reheat, tags, rating.Notes)
+	err = tx.QueryRow(ctx, `INSERT INTO ratings(id,decision_id,profile_id,overall,taste,ease,reheat,tags,notes) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT(decision_id,profile_id) DO UPDATE SET overall=EXCLUDED.overall,taste=EXCLUDED.taste,ease=EXCLUDED.ease,reheat=EXCLUDED.reheat,tags=EXCLUDED.tags,notes=EXCLUDED.notes
+		RETURNING id`,
+		ratingID, rating.DecisionID, rating.ProfileID, rating.Overall, rating.Taste, rating.Ease, rating.Reheat, tags, rating.Notes).Scan(&ratingID)
 	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE preference_events SET reverted_at=now() WHERE rating_id=$1 AND reverted_at IS NULL`, ratingID); err != nil {
 		return nil, err
 	}
 	delta := float64(rating.Overall-3) * .25

@@ -7,6 +7,7 @@ x-backend: &backend
   environment:
     APP_ENV: development
     AUTH_DEV_BYPASS: "true"
+    DEV_DEMO_DATA: ${DEV_DEMO_DATA:-true}
     DATABASE_URL: postgres://suppervisor:${POSTGRES_PASSWORD:-suppervisor}@postgres:5432/suppervisor?sslmode=disable
     OLLAMA_URL: ${OLLAMA_URL:-}
     OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}

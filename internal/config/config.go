@@ -18,6 +18,7 @@ type Config struct {
 	OIDCIssuer            string
 	OIDCClientID          string
 	AuthDevBypass         bool
+	DevDemoData           bool
 	TelegramToken         string
 	TelegramMode          string
 	TelegramWebhookURL    string
@@ -37,6 +38,7 @@ func Load() (Config, error) {
 		OIDCIssuer:            os.Getenv("OIDC_ISSUER"),
 		OIDCClientID:          env("OIDC_CLIENT_ID", "suppervisor"),
 		AuthDevBypass:         boolEnv("AUTH_DEV_BYPASS", true),
+		DevDemoData:           boolEnv("DEV_DEMO_DATA", true),
 		TelegramToken:         os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramMode:          env("TELEGRAM_MODE", "polling"),
 		TelegramWebhookURL:    os.Getenv("TELEGRAM_WEBHOOK_URL"),
@@ -46,6 +48,9 @@ func Load() (Config, error) {
 	}
 	if cfg.Environment == "production" && cfg.AuthDevBypass {
 		return Config{}, errors.New("AUTH_DEV_BYPASS cannot be enabled in production")
+	}
+	if cfg.Environment == "production" {
+		cfg.DevDemoData = false
 	}
 	if cfg.Environment == "production" && cfg.OIDCIssuer == "" {
 		return Config{}, errors.New("OIDC_ISSUER is required in production")
