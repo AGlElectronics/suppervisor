@@ -54,12 +54,15 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer db.Close()
-	if err := db.Migrate(rootCtx); err != nil {
-		return err
-	}
 	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := db.Migrate(rootCtx); err != nil {
+			return err
+		}
 		logger.Info("migrations complete")
 		return nil
+	}
+	if err := db.CheckSchema(rootCtx); err != nil {
+		return err
 	}
 	if cfg.DevDemoData {
 		if err := db.SeedDemo(rootCtx); err != nil {
@@ -69,8 +72,16 @@ func run(logger *slog.Logger) error {
 	}
 
 	var provider llm.Provider
+	ready := db.Ready
 	if cfg.OllamaURL != "" {
-		provider = llm.Ollama{BaseURL: cfg.OllamaURL, Model: cfg.OllamaModel}
+		ollama := llm.Ollama{BaseURL: cfg.OllamaURL, Model: cfg.OllamaModel}
+		provider = ollama
+		ready = func(ctx context.Context) error {
+			if err := db.Ready(ctx); err != nil {
+				return err
+			}
+			return ollama.Ready(ctx)
+		}
 	}
 	service := app.Service{Store: db, Generator: llm.Generator{Provider: provider}, Planner: domain.Planner{}}
 	var verify httpapi.VerifyToken
@@ -85,7 +96,7 @@ func run(logger *slog.Logger) error {
 			return err
 		}
 	}
-	api := httpapi.Server{Service: service, Store: db, Config: cfg, VerifyToken: verify, Logger: logger}
+	api := httpapi.Server{Service: service, Store: db, Config: cfg, VerifyToken: verify, Ready: ready, Logger: logger}
 	rootMux := http.NewServeMux()
 	rootMux.Handle("/", api.Handler())
 

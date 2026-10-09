@@ -51,7 +51,10 @@ func (b Bot) WebhookHandler() http.Handler {
 			http.Error(w, "invalid update", http.StatusBadRequest)
 			return
 		}
-		go b.handle(context.Background(), item)
+		if err := b.handle(r.Context(), item); err != nil {
+			http.Error(w, "update processing failed", http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 }
@@ -81,42 +84,57 @@ func (b Bot) RunPolling(ctx context.Context) error {
 			continue
 		}
 		for _, item := range response.Result {
+			if err := b.handle(ctx, item); err != nil {
+				break
+			}
 			offset = item.UpdateID + 1
-			b.handle(ctx, item)
 		}
 	}
 	return ctx.Err()
 }
 
-func (b Bot) handle(ctx context.Context, item update) {
+func (b Bot) handle(ctx context.Context, item update) error {
 	if item.Message == nil {
-		return
+		return nil
 	}
 	claimed, err := b.Store.ClaimTelegramUpdate(ctx, item.UpdateID)
 	if err != nil {
 		b.logger().ErrorContext(ctx, "telegram update claim failed", "update_id", item.UpdateID, "error", err)
-		return
+		return err
 	}
 	if !claimed {
 		b.logger().InfoContext(ctx, "telegram duplicate ignored", "update_id", item.UpdateID)
-		return
+		return nil
 	}
+	if err := b.process(ctx, item); err != nil {
+		if markErr := b.Store.FailTelegramUpdate(ctx, item.UpdateID, err); markErr != nil {
+			b.logger().ErrorContext(ctx, "telegram update failure mark failed", "update_id", item.UpdateID, "error", markErr)
+		}
+		b.logger().ErrorContext(ctx, "telegram update processing failed", "update_id", item.UpdateID, "error", err)
+		return err
+	}
+	if err := b.Store.CompleteTelegramUpdate(ctx, item.UpdateID); err != nil {
+		b.logger().ErrorContext(ctx, "telegram update completion failed", "update_id", item.UpdateID, "error", err)
+		return err
+	}
+	return nil
+}
+
+func (b Bot) process(ctx context.Context, item update) error {
 	if !b.Config.TelegramAllowlist[item.Message.From.ID] {
 		b.logger().WarnContext(ctx, "telegram user denied", "user_id", item.Message.From.ID)
-		return
+		return nil
 	}
 	text := strings.TrimSpace(item.Message.Text)
 	fields := strings.Fields(text)
 	if len(fields) > 0 && strings.HasPrefix(fields[0], "/") {
 		command := strings.SplitN(fields[0], "@", 2)[0]
 		if command == "/start" || command == "/help" {
-			b.send(ctx, item.Message.Chat.ID, "Tell me what dinner needs to do, naturally.\n\nCommands after I suggest one:\n/accept <decision>\n/reject <decision>\n/adjust <decision> <change>\n/shop <decision>\n/cook <decision>\n/rate <decision> <alan|partner> <overall> <taste> <ease> <reheat> [notes]")
-			return
+			return b.send(ctx, item.Message.Chat.ID, "Tell me what dinner needs to do, naturally.\n\nCommands after I suggest one:\n/accept <decision>\n/reject <decision>\n/adjust <decision> <change>\n/shop <decision>\n/cook <decision>\n/rate <decision> <alan|partner> <overall> <taste> <ease> <reheat> [notes]")
 		}
 		if command == "/rate" {
 			if len(fields) < 7 {
-				b.send(ctx, item.Message.Chat.ID, "Use /rate <decision> <alan|partner> <overall> <taste> <ease> <reheat> [notes]. Scores run from 1 to 5.")
-				return
+				return b.send(ctx, item.Message.Chat.ID, "Use /rate <decision> <alan|partner> <overall> <taste> <ease> <reheat> [notes]. Scores run from 1 to 5.")
 			}
 			scores := make([]int, 4)
 			for i := range scores {
@@ -128,19 +146,16 @@ func (b Bot) handle(ctx context.Context, item update) {
 				Notes: strings.Join(fields[7:], " "),
 			}
 			if rating.ProfileID != "alan" && rating.ProfileID != "partner" {
-				b.send(ctx, item.Message.Chat.ID, "Choose alan or partner so the right profile learns.")
-				return
+				return b.send(ctx, item.Message.Chat.ID, "Choose alan or partner so the right profile learns.")
 			}
 			if _, err := b.Service.Rate(ctx, rating); err != nil {
-				b.send(ctx, item.Message.Chat.ID, "I couldn’t save that rating: "+err.Error())
+				return b.send(ctx, item.Message.Chat.ID, "I couldn’t save that rating: "+err.Error())
 			} else {
-				b.send(ctx, item.Message.Chat.ID, "Rating saved to "+rating.ProfileID+" — useful, not personal.")
+				return b.send(ctx, item.Message.Chat.ID, "Rating saved to "+rating.ProfileID+" — useful, not personal.")
 			}
-			return
 		}
 		if len(fields) < 2 {
-			b.send(ctx, item.Message.Chat.ID, "That command needs a decision ID. /help shows the shape.")
-			return
+			return b.send(ctx, item.Message.Chat.ID, "That command needs a decision ID. /help shows the shape.")
 		}
 		id := fields[1]
 		switch command {
@@ -148,82 +163,73 @@ func (b Bot) handle(ctx context.Context, item update) {
 			status := strings.TrimPrefix(command, "/") + "ed"
 			if status == "accepted" || status == "rejected" {
 				if err := b.Service.SetStatus(ctx, id, status, ""); err != nil {
-					b.send(ctx, item.Message.Chat.ID, "That decision slipped away: "+err.Error())
+					return b.send(ctx, item.Message.Chat.ID, "That decision slipped away: "+err.Error())
 				} else {
-					b.send(ctx, item.Message.Chat.ID, "Done. Dinner has a direction.")
+					return b.send(ctx, item.Message.Chat.ID, "Done. Dinner has a direction.")
 				}
-				return
 			}
 		case "/adjust":
 			note := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(text, fields[0]), id))
 			if note == "" {
-				b.send(ctx, item.Message.Chat.ID, "Tell me what should change after the decision ID.")
-				return
+				return b.send(ctx, item.Message.Chat.ID, "Tell me what should change after the decision ID.")
 			}
-			if err := b.Service.SetStatus(ctx, id, "adjusted", note); err != nil {
-				b.send(ctx, item.Message.Chat.ID, "I couldn't save that adjustment: "+err.Error())
+			replacements, err := b.Service.Adjust(ctx, id, note)
+			if err != nil {
+				return b.send(ctx, item.Message.Chat.ID, "I couldn't save that adjustment: "+err.Error())
 			} else {
-				b.send(ctx, item.Message.Chat.ID, "Adjustment noted. I’ll remember the why.")
+				best := replacements[0]
+				return b.send(ctx, item.Message.Chat.ID, fmt.Sprintf(
+					"Adjustment applied. New top match: %s (score %.1f)\n/accept %s",
+					best.Candidate.Title, best.Score.Total, best.ID,
+				))
 			}
-			return
 		case "/shop", "/cook":
-			b.sendWorkflow(ctx, item.Message.Chat.ID, id, command == "/cook")
-			return
+			return b.sendWorkflow(ctx, item.Message.Chat.ID, id, command == "/cook")
 		default:
-			b.send(ctx, item.Message.Chat.ID, "I don’t know that command yet. Try /help, or just describe dinner.")
-			return
+			return b.send(ctx, item.Message.Chat.ID, "I don’t know that command yet. Try /help, or just describe dinner.")
 		}
 	}
 	decisions, err := b.Service.Plan(ctx, app.PlanInput{Text: text})
 	if err != nil {
-		b.send(ctx, item.Message.Chat.ID, "Dinner hit a snag: "+err.Error())
-		return
+		return b.send(ctx, item.Message.Chat.ID, "Dinner hit a snag: "+err.Error())
 	}
 	best := decisions[0]
 	if len(best.Violations) > 0 {
-		b.send(ctx, item.Message.Chat.ID, "I couldn't make every rule work. Closest: "+best.Candidate.Title+"\nNeeds attention: "+strings.Join(best.Violations, "; "))
-		return
+		return b.send(ctx, item.Message.Chat.ID, "I couldn't make every rule work. Closest: "+best.Candidate.Title+"\nNeeds attention: "+strings.Join(best.Violations, "; "))
 	}
 	message := fmt.Sprintf("%s\n%s\n\n%d min · £%.2f · %d portions · score %.1f\n\n/accept %s\n/reject %s\n/adjust %s <what to change>",
 		best.Candidate.Title, best.Candidate.Summary, best.Candidate.TotalMinutes, float64(best.Candidate.CostPence)/100, best.Candidate.Servings, best.Score.Total, best.ID, best.ID, best.ID)
-	b.send(ctx, item.Message.Chat.ID, message)
+	return b.send(ctx, item.Message.Chat.ID, message)
 }
 
-func (b Bot) sendWorkflow(ctx context.Context, chatID int64, id string, cooking bool) {
-	decisions, err := b.Store.Decisions(ctx, 100)
+func (b Bot) sendWorkflow(ctx context.Context, chatID int64, id string, cooking bool) error {
+	decision, err := b.Store.DecisionByID(ctx, id)
 	if err != nil {
-		b.send(ctx, chatID, "Couldn’t load that recipe.")
-		return
+		return b.send(ctx, chatID, "Couldn’t load that recipe.")
 	}
-	for _, decision := range decisions {
-		if decision.ID != id {
-			continue
+	var lines []string
+	if cooking {
+		lines = append(lines, "Aprons on: "+decision.Candidate.Title)
+		for i, step := range decision.Candidate.Steps {
+			lines = append(lines, fmt.Sprintf("%d. %s (%d min)\n%s", i+1, step.Title, step.Minutes, step.Detail))
 		}
-		var lines []string
-		if cooking {
-			lines = append(lines, "Aprons on: "+decision.Candidate.Title)
-			for i, step := range decision.Candidate.Steps {
-				lines = append(lines, fmt.Sprintf("%d. %s (%d min)\n%s", i+1, step.Title, step.Minutes, step.Detail))
-			}
-		} else {
-			lines = append(lines, "Shopping for "+decision.Candidate.Title)
-			for _, item := range app.Shopping(decision.Candidate, decision.Request.Available) {
-				lines = append(lines, fmt.Sprintf("□ %g %s %s", item.Quantity, item.Unit, item.Name))
-			}
+	} else {
+		lines = append(lines, "Shopping for "+decision.Candidate.Title)
+		for _, item := range app.Shopping(decision.Candidate, decision.Request.Available) {
+			lines = append(lines, fmt.Sprintf("□ %g %s %s", item.Quantity, item.Unit, item.Name))
 		}
-		b.send(ctx, chatID, strings.Join(lines, "\n"))
-		return
 	}
-	b.send(ctx, chatID, "I can’t find that dinner decision.")
+	return b.send(ctx, chatID, strings.Join(lines, "\n"))
 }
 
-func (b Bot) send(ctx context.Context, chatID int64, text string) {
+func (b Bot) send(ctx context.Context, chatID int64, text string) error {
 	for _, chunk := range splitMessage(text, 3900) {
 		if err := b.call(ctx, "sendMessage", map[string]any{"chat_id": chatID, "text": chunk}, nil); err != nil {
 			b.logger().ErrorContext(ctx, "telegram send failed", "error", err)
-			return
+			return err
 		}
 	}
+	return nil
 }
 
 func splitMessage(text string, limit int) []string {

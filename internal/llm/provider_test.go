@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/AGlElectronics/suppervisor/internal/domain"
@@ -10,6 +12,21 @@ import (
 type sequenceProvider struct {
 	responses []string
 	calls     int
+}
+
+func TestOllamaReadyRequiresConfiguredModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"models":[{"name":"other:latest"}]}`))
+	}))
+	defer server.Close()
+	ollama := Ollama{BaseURL: server.URL, Model: "qwen"}
+	if err := ollama.Ready(context.Background()); err == nil {
+		t.Fatal("expected readiness to reject a missing model")
+	}
+	ollama.Model = "other"
+	if err := ollama.Ready(context.Background()); err != nil {
+		t.Fatalf("expected available model to be ready: %v", err)
+	}
 }
 
 func (s *sequenceProvider) Complete(_ context.Context, _, _ string) (string, error) {

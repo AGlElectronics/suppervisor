@@ -56,14 +56,50 @@ func Open(ctx context.Context, databaseURL string) (*Postgres, error) {
 func (p *Postgres) Close()                          { p.Pool.Close() }
 func (p *Postgres) Ready(ctx context.Context) error { return p.Pool.Ping(ctx) }
 
+func (p *Postgres) CheckSchema(ctx context.Context) error {
+	var current bool
+	if err := p.Pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM schema_migrations WHERE version='00001_initial'
+	)`).Scan(&current); err != nil {
+		return fmt.Errorf("schema is not initialized; run suppervisor migrate: %w", err)
+	}
+	if !current {
+		return errors.New("schema is not current; run suppervisor migrate")
+	}
+	return nil
+}
+
 func (p *Postgres) ClaimTelegramUpdate(ctx context.Context, updateID int64) (bool, error) {
-	command, err := p.Pool.Exec(ctx, `WITH pruned AS (
-		DELETE FROM telegram_updates WHERE received_at < now() - interval '30 days'
-	) INSERT INTO telegram_updates(update_id) VALUES($1) ON CONFLICT(update_id) DO NOTHING`, updateID)
+	var claimed int64
+	err := p.Pool.QueryRow(ctx, `WITH pruned AS (
+		DELETE FROM telegram_updates WHERE status='completed' AND received_at < now() - interval '30 days'
+	) INSERT INTO telegram_updates(update_id) VALUES($1)
+	ON CONFLICT(update_id) DO UPDATE SET
+		status='processing', attempts=telegram_updates.attempts+1, last_error='', updated_at=now()
+	WHERE telegram_updates.status='failed'
+	   OR (telegram_updates.status='processing' AND telegram_updates.updated_at < now() - interval '2 minutes')
+	RETURNING update_id`, updateID).Scan(&claimed)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	return command.RowsAffected() == 1, nil
+	return claimed == updateID, nil
+}
+
+func (p *Postgres) CompleteTelegramUpdate(ctx context.Context, updateID int64) error {
+	_, err := p.Pool.Exec(ctx, `UPDATE telegram_updates SET status='completed',updated_at=now() WHERE update_id=$1`, updateID)
+	return err
+}
+
+func (p *Postgres) FailTelegramUpdate(ctx context.Context, updateID int64, cause error) error {
+	message := ""
+	if cause != nil {
+		message = cause.Error()
+	}
+	_, err := p.Pool.Exec(ctx, `UPDATE telegram_updates SET status='failed',last_error=$2,updated_at=now() WHERE update_id=$1`, updateID, message)
+	return err
 }
 
 func (p *Postgres) Migrate(ctx context.Context) error {
@@ -398,6 +434,16 @@ func (p *Postgres) SetDecisionStatus(ctx context.Context, id, status, correction
 	return tx.Commit(ctx)
 }
 
+func (p *Postgres) RecordDecisionEvent(ctx context.Context, decisionID, eventType string, detail map[string]any) error {
+	raw, err := json.Marshal(detail)
+	if err != nil {
+		return err
+	}
+	_, err = p.Pool.Exec(ctx, `INSERT INTO decision_events(id,decision_id,event_type,actor,detail)
+		VALUES($1,$2,$3,'system',$4)`, newID(), decisionID, eventType, raw)
+	return err
+}
+
 func (p *Postgres) SaveRating(ctx context.Context, rating domain.Rating, candidate domain.Candidate) ([]domain.PreferenceEvent, error) {
 	tx, err := p.Pool.Begin(ctx)
 	if err != nil {
@@ -439,7 +485,7 @@ func (p *Postgres) SaveRating(ctx context.Context, rating domain.Rating, candida
 	}
 	var events []domain.PreferenceEvent
 	record := func(key string, delta float64, reason string) error {
-		event := domain.PreferenceEvent{ID: newID(), ProfileID: rating.ProfileID, Key: strings.ToLower(key), Delta: delta, Reason: reason, CreatedAt: time.Now().UTC()}
+		event := domain.PreferenceEvent{ID: newID(), ProfileID: rating.ProfileID, Key: strings.ToLower(key), Delta: delta, Reason: reason, RatingID: &ratingID, CreatedAt: time.Now().UTC()}
 		_, err = tx.Exec(ctx, `INSERT INTO preference_events(id,profile_id,key,delta,reason,rating_id) VALUES($1,$2,$3,$4,$5,$6)`, event.ID, event.ProfileID, event.Key, event.Delta, event.Reason, ratingID)
 		if err != nil {
 			return err
@@ -494,8 +540,8 @@ func compensatePreferenceEvent(ctx context.Context, tx pgx.Tx, id, reason string
 		FROM preference_events original
 		WHERE original.id=$2 AND original.reversal_of IS NULL
 		  AND NOT EXISTS(SELECT 1 FROM preference_events existing WHERE existing.reversal_of=original.id)
-		RETURNING id,profile_id,key,delta,reason,reversal_of,created_at`, reversalID, id, reason).
-		Scan(&event.ID, &event.ProfileID, &event.Key, &event.Delta, &event.Reason, &event.ReversalOf, &event.CreatedAt)
+		RETURNING id,profile_id,key,delta,reason,rating_id,reversal_of,created_at`, reversalID, id, reason).
+		Scan(&event.ID, &event.ProfileID, &event.Key, &event.Delta, &event.Reason, &event.RatingID, &event.ReversalOf, &event.CreatedAt)
 	return event, err
 }
 
@@ -513,7 +559,7 @@ func refreshPreferences(ctx context.Context, tx pgx.Tx, profileID string) error 
 }
 
 func (p *Postgres) PreferenceEvents(ctx context.Context) ([]domain.PreferenceEvent, error) {
-	rows, err := p.Pool.Query(ctx, `SELECT event.id,event.profile_id,event.key,event.delta,event.reason,event.reversal_of,reversal.created_at,event.created_at
+	rows, err := p.Pool.Query(ctx, `SELECT event.id,event.profile_id,event.key,event.delta,event.reason,event.rating_id,event.reversal_of,reversal.created_at,event.created_at
 		FROM preference_events event
 		LEFT JOIN preference_events reversal ON reversal.reversal_of=event.id
 		ORDER BY event.created_at DESC LIMIT 100`)
@@ -524,7 +570,7 @@ func (p *Postgres) PreferenceEvents(ctx context.Context) ([]domain.PreferenceEve
 	var out []domain.PreferenceEvent
 	for rows.Next() {
 		var event domain.PreferenceEvent
-		if err := rows.Scan(&event.ID, &event.ProfileID, &event.Key, &event.Delta, &event.Reason, &event.ReversalOf, &event.RevertedAt, &event.CreatedAt); err != nil {
+		if err := rows.Scan(&event.ID, &event.ProfileID, &event.Key, &event.Delta, &event.Reason, &event.RatingID, &event.ReversalOf, &event.RevertedAt, &event.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, event)

@@ -23,6 +23,39 @@ type Ollama struct {
 	Client  *http.Client
 }
 
+func (o Ollama) Ready(ctx context.Context) error {
+	client := o.Client
+	if client == nil {
+		client = &http.Client{Timeout: 3 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(o.BaseURL, "/")+"/api/tags", nil)
+	if err != nil {
+		return err
+	}
+	res, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("ollama readiness: %w", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode/100 != 2 {
+		return fmt.Errorf("ollama readiness returned %s", res.Status)
+	}
+	var response struct {
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&response); err != nil {
+		return fmt.Errorf("ollama readiness response: %w", err)
+	}
+	for _, model := range response.Models {
+		if model.Name == o.Model || strings.TrimSuffix(model.Name, ":latest") == o.Model {
+			return nil
+		}
+	}
+	return fmt.Errorf("ollama model %q is not available", o.Model)
+}
+
 func (o Ollama) Complete(ctx context.Context, system, prompt string) (string, error) {
 	client := o.Client
 	if client == nil {

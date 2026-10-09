@@ -93,6 +93,7 @@ type PreferenceEvent struct {
 	Key        string     `json:"key"`
 	Delta      float64    `json:"delta"`
 	Reason     string     `json:"reason"`
+	RatingID   *string    `json:"ratingId,omitempty"`
 	ReversalOf *string    `json:"reversalOf,omitempty"`
 	RevertedAt *time.Time `json:"revertedAt,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`

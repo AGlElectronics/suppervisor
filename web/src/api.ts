@@ -44,6 +44,8 @@ export type Decision = {
   candidate: Candidate;
   score: {
     preference: number;
+    fairness?: number;
+    byDiner?: Record<string, number>;
     time: number;
     cost: number;
     leftovers: number;
@@ -63,6 +65,7 @@ export type PreferenceEvent = {
   key: string;
   delta: number;
   reason: string;
+  ratingId?: string;
   reversalOf?: string;
   revertedAt?: string;
   createdAt: string;
@@ -135,7 +138,7 @@ export const api = {
       body: JSON.stringify({ text }),
     }),
   setDecision: (id: string, status: Decision["status"], correction = "") =>
-    request<void>(`/decisions/${id}`, {
+    request<{ decisions?: Decision[] } | undefined>(`/decisions/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ status, correction }),
     }),

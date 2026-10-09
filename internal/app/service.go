@@ -84,6 +84,34 @@ func (s Service) SetStatus(ctx context.Context, id, status, correction string) e
 	return s.Store.SetDecisionStatus(ctx, id, status, correction)
 }
 
+func (s Service) Adjust(ctx context.Context, id, correction string) ([]domain.Decision, error) {
+	correction = strings.TrimSpace(correction)
+	if correction == "" {
+		return nil, errors.New("adjustment is required")
+	}
+	original, err := s.Store.DecisionByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	request := domain.ParseRequest(strings.TrimSpace(original.Request.Text + ". Adjustment: " + correction))
+	decisions, err := s.Plan(ctx, PlanInput{Structured: &request})
+	if err != nil {
+		return nil, err
+	}
+	if err := s.SetStatus(ctx, id, "adjusted", correction); err != nil {
+		return nil, err
+	}
+	for _, decision := range decisions {
+		if err := s.Store.RecordDecisionEvent(ctx, decision.ID, "regenerated", map[string]any{
+			"adjustedFrom": id,
+			"correction":   correction,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return decisions, nil
+}
+
 func (s Service) Rate(ctx context.Context, rating domain.Rating) ([]domain.PreferenceEvent, error) {
 	if rating.Overall < 1 || rating.Overall > 5 || rating.Taste < 1 || rating.Taste > 5 ||
 		rating.Ease < 1 || rating.Ease > 5 || rating.Reheat < 1 || rating.Reheat > 5 {

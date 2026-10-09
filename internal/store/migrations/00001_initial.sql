@@ -83,7 +83,11 @@ CREATE INDEX preference_events_profile_idx ON preference_events (profile_id, cre
 
 CREATE TABLE telegram_updates (
   update_id bigint PRIMARY KEY,
-  received_at timestamptz NOT NULL DEFAULT now()
+  status text NOT NULL DEFAULT 'processing' CHECK (status IN ('processing','completed','failed')),
+  attempts integer NOT NULL DEFAULT 1,
+  last_error text NOT NULL DEFAULT '',
+  received_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 INSERT INTO profiles (id, name, dislikes, likes, base_preferences, preferences) VALUES

@@ -21,6 +21,7 @@ type Server struct {
 	Store       *store.Postgres
 	Config      config.Config
 	VerifyToken VerifyToken
+	Ready       func(context.Context) error
 	Logger      *slog.Logger
 }
 
@@ -30,8 +31,13 @@ func (s Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "alive"})
 	})
 	mux.HandleFunc("GET /health/ready", func(w http.ResponseWriter, r *http.Request) {
-		if err := s.Store.Ready(r.Context()); err != nil {
-			writeError(w, http.StatusServiceUnavailable, "database is not ready")
+		check := s.Ready
+		if check == nil {
+			check = s.Store.Ready
+		}
+		if err := check(r.Context()); err != nil {
+			slog.Default().WarnContext(r.Context(), "readiness check failed", "error", err)
+			writeError(w, http.StatusServiceUnavailable, "required dependencies are not ready")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
@@ -123,6 +129,15 @@ func (s Server) decision(w http.ResponseWriter, r *http.Request) {
 		Correction string `json:"correction"`
 	}
 	if !decode(w, r, &input) {
+		return
+	}
+	if input.Status == "adjusted" {
+		decisions, err := s.Service.Adjust(r.Context(), r.PathValue("id"), input.Correction)
+		if err != nil {
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"decisions": decisions})
 		return
 	}
 	if err := s.Service.SetStatus(r.Context(), r.PathValue("id"), input.Status, input.Correction); err != nil {

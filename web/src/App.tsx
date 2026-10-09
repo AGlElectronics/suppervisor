@@ -79,6 +79,8 @@ function App() {
     "Something cosy under 35 minutes, with two lunches",
   );
   const [planning, setPlanning] = useState(false);
+  const [activePlan, setActivePlan] = useState<Decision[]>([]);
+  const [selectedDecisionId, setSelectedDecisionId] = useState("");
   const [notice, setNotice] = useState("");
   const [ratingOpen, setRatingOpen] = useState(false);
   const [adjustOpen, setAdjustOpen] = useState(false);
@@ -103,13 +105,15 @@ function App() {
       .then(setData)
       .catch(() => setOffline(true));
   }, [auth.ready, auth.required, auth.user]);
-  const tonight = useMemo(
-    () =>
+  const tonight = useMemo(() => {
+    const selected = data.decisions.find((d) => d.id === selectedDecisionId);
+    return (
+      selected ??
       data.decisions.find((d) => d.status === "accepted") ??
       data.decisions.find((d) => d.status === "proposed") ??
-      data.decisions[0],
-    [data.decisions],
-  );
+      data.decisions[0]
+    );
+  }, [data.decisions, selectedDecisionId]);
   const persistedWorkflow = tonight
     ? data.workflowStates.find((state) => state.decisionId === tonight.id)
     : undefined;
@@ -129,6 +133,8 @@ function App() {
         ...current,
         decisions: [...result.decisions, ...current.decisions],
       }));
+      setActivePlan(result.decisions);
+      setSelectedDecisionId(result.decisions[0]?.id ?? "");
       setOffline(false);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : brand.voice.error);
@@ -136,22 +142,33 @@ function App() {
       setPlanning(false);
     }
   }
-  async function updateDecision(status: Decision["status"], correction = "") {
-    if (!tonight) return;
+  async function updateDecision(
+    id: string,
+    status: Decision["status"],
+    correction = "",
+  ) {
+    const target = data.decisions.find((decision) => decision.id === id);
+    if (!target) return;
     try {
-      if (!offline) await api.setDecision(tonight.id, status, correction);
+      const response = offline
+        ? undefined
+        : await api.setDecision(id, status, correction);
+      const replacements = response?.decisions ?? [];
       setData((current) => ({
         ...current,
-        decisions: current.decisions.map((d) =>
-          d.id === tonight.id ? { ...d, status, correction } : d,
-        ),
+        decisions: [
+          ...replacements,
+          ...current.decisions.map((d) =>
+            d.id === id ? { ...d, status, correction } : d,
+          ),
+        ],
         decisionEvents:
-          tonight.status === status && tonight.correction === correction
+          target.status === status && target.correction === correction
             ? current.decisionEvents
             : [
                 {
                   id: crypto.randomUUID(),
-                  decisionId: tonight.id,
+                  decisionId: id,
                   type: status,
                   actor: "user",
                   detail: { correction },
@@ -160,6 +177,16 @@ function App() {
                 ...current.decisionEvents,
               ],
       }));
+      setActivePlan((current) =>
+        replacements.length > 0
+          ? replacements
+          : current.map((decision) =>
+              decision.id === id
+                ? { ...decision, status, correction }
+                : decision,
+            ),
+      );
+      setSelectedDecisionId(replacements[0]?.id ?? id);
       setNotice(
         status === "accepted"
           ? brand.voice.accepted
@@ -317,15 +344,21 @@ function App() {
         )}
         {screen === "tonight" && (
           <Tonight
-            decision={tonight}
+            decisions={activePlan.length > 0 ? activePlan : tonight ? [tonight] : []}
             brief={brief}
             setBrief={setBrief}
             planning={planning}
             onPlan={makePlan}
-            onAccept={() => updateDecision("accepted")}
-            onReject={() => updateDecision("rejected")}
-            onAdjust={() => setAdjustOpen(true)}
-            onOpen={() => setScreen("recipe")}
+            onAccept={(id) => updateDecision(id, "accepted")}
+            onReject={(id) => updateDecision(id, "rejected")}
+            onAdjust={(id) => {
+              setSelectedDecisionId(id);
+              setAdjustOpen(true);
+            }}
+            onOpen={(id) => {
+              setSelectedDecisionId(id);
+              setScreen("recipe");
+            }}
           />
         )}
         {screen === "recipe" && (
@@ -355,7 +388,7 @@ function App() {
               void updateWorkflow(checked, next);
             }}
             onFinish={() => {
-              updateDecision("cooked");
+              if (tonight) updateDecision(tonight.id, "cooked");
               setRatingOpen(true);
             }}
           />
@@ -401,7 +434,9 @@ function App() {
           <AdjustmentDialog
             open={adjustOpen}
             onOpenChange={setAdjustOpen}
-            onSave={(correction) => updateDecision("adjusted", correction)}
+            onSave={(correction) =>
+              tonight && updateDecision(tonight.id, "adjusted", correction)
+            }
           />
           <RatingDialog
             open={ratingOpen}
@@ -570,7 +605,7 @@ function PageIntro({
   );
 }
 function Tonight({
-  decision,
+  decisions,
   brief,
   setBrief,
   planning,
@@ -580,15 +615,15 @@ function Tonight({
   onAdjust,
   onOpen,
 }: {
-  decision?: Decision;
+  decisions: Decision[];
   brief: string;
   setBrief: (v: string) => void;
   planning: boolean;
   onPlan: (e: React.FormEvent) => void;
-  onAccept: () => void;
-  onReject: () => void;
-  onAdjust: () => void;
-  onOpen: () => void;
+  onAccept: (id: string) => void;
+  onReject: (id: string) => void;
+  onAdjust: (id: string) => void;
+  onOpen: (id: string) => void;
 }) {
   return (
     <div className="page-grid">
@@ -618,14 +653,25 @@ function Tonight({
           </div>
         </form>
       </section>
-      {decision ? (
-        <CandidateCard
-          decision={decision}
-          onAccept={onAccept}
-          onReject={onReject}
-          onAdjust={onAdjust}
-          onOpen={onOpen}
-        />
+      {decisions.length > 0 ? (
+        <section className="grid gap-4" aria-label="Ranked dinner candidates">
+          {decisions.map((decision, index) => (
+            <div key={decision.id}>
+              {decisions.length > 1 && (
+                <p className="eyebrow mb-2">
+                  {index === 0 ? "Best fit" : `Option ${index + 1}`}
+                </p>
+              )}
+              <CandidateCard
+                decision={decision}
+                onAccept={() => onAccept(decision.id)}
+                onReject={() => onReject(decision.id)}
+                onAdjust={() => onAdjust(decision.id)}
+                onOpen={() => onOpen(decision.id)}
+              />
+            </div>
+          ))}
+        </section>
       ) : (
         <Empty />
       )}
@@ -689,14 +735,23 @@ function CandidateCard({
         <summary>Why this fits</summary>
         <dl>
           {Object.entries(decision.score)
-            .filter(([key]) => key !== "total")
+            .filter(([key]) => key !== "total" && key !== "byDiner")
             .map(([key, value]) => (
               <div key={key}>
                 <dt>{key}</dt>
-                <dd>{value}</dd>
+                <dd>{typeof value === "number" ? value : "—"}</dd>
               </div>
             ))}
         </dl>
+        {decision.score.byDiner &&
+          Object.keys(decision.score.byDiner).length > 0 && (
+            <p>
+              Diner fit:{" "}
+              {Object.entries(decision.score.byDiner)
+                .map(([profile, fit]) => `${profile} ${fit}`)
+                .join(" · ")}
+            </p>
+          )}
         {(decision.request.assumptions?.length ?? 0) > 0 && (
           <p>
             Assumed: {decision.request.assumptions?.join(" · ")}. Adjust if
@@ -1064,6 +1119,11 @@ function Management({
                       {event.profileId} · {event.key}
                     </strong>
                     <p>{event.reason}</p>
+                    {event.ratingId && (
+                      <p className="text-xs text-muted">
+                        Source rating: {event.ratingId}
+                      </p>
+                    )}
                   </div>
                   <span className={event.delta >= 0 ? "good" : "bad"}>
                     {event.delta > 0 ? "+" : ""}
