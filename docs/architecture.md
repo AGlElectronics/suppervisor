@@ -26,9 +26,9 @@ The generator returns recipe facts; it does not make policy decisions. `internal
 
 ## Persistence and learning
 
-Profiles contain explicit likes, hard dislikes, baseline preference weights, and a materialized current preference map. Ratings create append-only `preference_events`; each event records profile, key, delta, reason, source rating, timestamp, and optional reversal timestamp. Rebuilding the current map starts with baseline preferences and sums non-reverted events. Reversing an event never deletes evidence.
+Profiles contain explicit likes, hard dislikes, baseline preference weights, and a materialized current preference map. Ratings create append-only `preference_events`; each event records profile, key, delta, reason, source rating, timestamp, and an optional link to the event it compensates. Rebuilding the current map starts with baseline preferences and sums every event, including negative compensations. Reversing an event inserts a new row and never edits or deletes evidence.
 
-Recipe bodies, requests, scores, and violations are stored as JSONB so iteration-one schemas can evolve while decision metadata remains queryable. Every accepted or cooked decision participates in recent-meal novelty scoring.
+Recipe bodies, requests, scores, and violations are stored as JSONB so iteration-one schemas can evolve while decision metadata remains queryable. Each proposal stores an immutable recipe snapshot, and status/correction changes append to `decision_events`. Every accepted or cooked decision participates in recent-meal novelty scoring.
 
 ## Generation failure policy
 
@@ -40,6 +40,7 @@ Ollama receives a JSON-only schema request. Missing or malformed candidate field
 - `AUTH_DEV_BYPASS` is accepted only outside `APP_ENV=production`.
 - Telegram requires a numeric user allowlist whenever a bot token is configured.
 - Webhooks require Telegram’s `X-Telegram-Bot-Api-Secret-Token`.
+- Telegram update IDs are claimed in PostgreSQL before processing, so polling retries and webhook redelivery are idempotent.
 - Health endpoints are unauthenticated and expose no user data.
 
 ## Deployment

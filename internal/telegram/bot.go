@@ -91,6 +91,15 @@ func (b Bot) handle(ctx context.Context, item update) {
 	if item.Message == nil {
 		return
 	}
+	claimed, err := b.Store.ClaimTelegramUpdate(ctx, item.UpdateID)
+	if err != nil {
+		b.logger().ErrorContext(ctx, "telegram update claim failed", "update_id", item.UpdateID, "error", err)
+		return
+	}
+	if !claimed {
+		b.logger().InfoContext(ctx, "telegram duplicate ignored", "update_id", item.UpdateID)
+		return
+	}
 	if !b.Config.TelegramAllowlist[item.Message.From.ID] {
 		b.logger().WarnContext(ctx, "telegram user denied", "user_id", item.Message.From.ID)
 		return

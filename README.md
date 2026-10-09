@@ -7,7 +7,7 @@ Suppervisor is a standalone, local-first dinner assistant for Alan and Partner. 
 ## What iteration one does
 
 - Keeps separate Alan and Partner profiles, dislikes, winners, and learned preferences.
-- Structures natural requests such as “something cosy under 35 minutes, two lunches, no mushrooms”.
+- Structures natural requests into a versioned contract, preserving visible assumptions such as default diners, equipment, time, and budget.
 - Validates generated recipe shape with one repair retry.
 - Enforces portions, lunch leftovers, reheating, time, cost, equipment, ingredients, and diner dislikes as hard constraints.
 - Scores preference fit, speed, price, leftovers, available ingredients, and recent-meal novelty deterministically.

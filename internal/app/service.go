@@ -26,6 +26,9 @@ func (s Service) Plan(ctx context.Context, input PlanInput) ([]domain.Decision, 
 	var req domain.PlanRequest
 	if input.Structured != nil {
 		req = *input.Structured
+		if req.SchemaVersion == 0 {
+			req.SchemaVersion = 1
+		}
 		if req.Text == "" {
 			req.Text = input.Text
 		}

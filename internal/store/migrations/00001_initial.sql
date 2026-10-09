@@ -37,6 +37,16 @@ CREATE TABLE decisions (
 );
 CREATE INDEX decisions_created_idx ON decisions (created_at DESC);
 
+CREATE TABLE decision_events (
+  id uuid PRIMARY KEY,
+  decision_id uuid NOT NULL REFERENCES decisions(id),
+  event_type text NOT NULL CHECK (event_type IN ('proposed','accepted','rejected','adjusted','cooked')),
+  actor text NOT NULL DEFAULT 'user',
+  detail jsonb NOT NULL DEFAULT '{}',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX decision_events_decision_idx ON decision_events (decision_id, created_at);
+
 CREATE TABLE ratings (
   id uuid PRIMARY KEY,
   decision_id uuid NOT NULL REFERENCES decisions(id),
@@ -58,10 +68,15 @@ CREATE TABLE preference_events (
   delta numeric NOT NULL,
   reason text NOT NULL,
   rating_id uuid REFERENCES ratings(id),
-  reverted_at timestamptz,
+  reversal_of uuid UNIQUE REFERENCES preference_events(id),
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX preference_events_profile_idx ON preference_events (profile_id, created_at DESC);
+
+CREATE TABLE telegram_updates (
+  update_id bigint PRIMARY KEY,
+  received_at timestamptz NOT NULL DEFAULT now()
+);
 
 INSERT INTO profiles (id, name, dislikes, likes, base_preferences, preferences) VALUES
   ('alan', 'Alan', '["aubergine"]', '["chicken thighs","beans","traybakes"]', '{"mediterranean":1.25,"mexican":0.75,"one-pan":1}', '{"mediterranean":1.25,"mexican":0.75,"one-pan":1}'),
@@ -74,8 +89,10 @@ INSERT INTO recipes (id, title, source, body) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- +suppervisor Down
+DROP TABLE IF EXISTS telegram_updates;
 DROP TABLE IF EXISTS preference_events;
 DROP TABLE IF EXISTS ratings;
+DROP TABLE IF EXISTS decision_events;
 DROP TABLE IF EXISTS decisions;
 DROP TABLE IF EXISTS recipes;
 DROP TABLE IF EXISTS profiles;

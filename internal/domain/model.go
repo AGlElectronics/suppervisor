@@ -11,6 +11,7 @@ type Profile struct {
 }
 
 type PlanRequest struct {
+	SchemaVersion    int      `json:"schemaVersion"`
 	Text             string   `json:"text"`
 	Diners           []string `json:"diners"`
 	Servings         int      `json:"servings"`
@@ -21,6 +22,7 @@ type PlanRequest struct {
 	Avoid            []string `json:"avoid"`
 	Equipment        []string `json:"equipment"`
 	RequireReheating bool     `json:"requireReheating"`
+	Assumptions      []string `json:"assumptions,omitempty"`
 }
 
 type Ingredient struct {
@@ -89,8 +91,18 @@ type PreferenceEvent struct {
 	Key        string     `json:"key"`
 	Delta      float64    `json:"delta"`
 	Reason     string     `json:"reason"`
+	ReversalOf *string    `json:"reversalOf,omitempty"`
 	RevertedAt *time.Time `json:"revertedAt,omitempty"`
 	CreatedAt  time.Time  `json:"createdAt"`
+}
+
+type DecisionEvent struct {
+	ID         string         `json:"id"`
+	DecisionID string         `json:"decisionId"`
+	Type       string         `json:"type"`
+	Actor      string         `json:"actor"`
+	Detail     map[string]any `json:"detail"`
+	CreatedAt  time.Time      `json:"createdAt"`
 }
 
 type ShoppingItem struct {

@@ -56,6 +56,16 @@ func Open(ctx context.Context, databaseURL string) (*Postgres, error) {
 func (p *Postgres) Close()                          { p.Pool.Close() }
 func (p *Postgres) Ready(ctx context.Context) error { return p.Pool.Ping(ctx) }
 
+func (p *Postgres) ClaimTelegramUpdate(ctx context.Context, updateID int64) (bool, error) {
+	command, err := p.Pool.Exec(ctx, `WITH pruned AS (
+		DELETE FROM telegram_updates WHERE received_at < now() - interval '30 days'
+	) INSERT INTO telegram_updates(update_id) VALUES($1) ON CONFLICT(update_id) DO NOTHING`, updateID)
+	if err != nil {
+		return false, err
+	}
+	return command.RowsAffected() == 1, nil
+}
+
 func (p *Postgres) Migrate(ctx context.Context) error {
 	if _, err := p.Pool.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
@@ -104,12 +114,21 @@ func (p *Postgres) SeedDemo(ctx context.Context) error {
 	_, err := p.Pool.Exec(ctx, `INSERT INTO decisions(id,request,recipe_id,score,violations,status,correction,created_at)
 		VALUES(
 			'00000000-0000-4000-8000-000000000001',
-			'{"text":"Something cosy under 35 minutes, with two lunches","diners":["alan","partner"],"servings":2,"lunchPortions":2,"maxMinutes":35,"maxCostPence":1200,"equipment":["hob","oven"],"requireReheating":true}',
+			'{"schemaVersion":1,"text":"Something cosy under 35 minutes, with two lunches","diners":["alan","partner"],"servings":2,"lunchPortions":2,"maxMinutes":35,"maxCostPence":1200,"equipment":["hob","oven"],"requireReheating":true,"assumptions":["standard hob and oven available"]}',
 			'known-winner-tomato-orzo',
 			'{"preference":32,"time":17,"cost":13,"leftovers":10,"novelty":9,"ingredients":11,"total":92}',
 			'[]',
 			'accepted',
 			'',
+			now() - interval '1 day'
+		) ON CONFLICT(id) DO NOTHING;
+		INSERT INTO decision_events(id,decision_id,event_type,actor,detail,created_at)
+		VALUES(
+			'00000000-0000-4000-8000-000000000002',
+			'00000000-0000-4000-8000-000000000001',
+			'accepted',
+			'demo',
+			'{"note":"development-only accepted meal"}',
 			now() - interval '1 day'
 		) ON CONFLICT(id) DO NOTHING`)
 	return err
@@ -175,6 +194,7 @@ func (p *Postgres) SaveDecision(ctx context.Context, decision domain.Decision) (
 	if decision.Candidate.ID == "" {
 		decision.Candidate.ID = "generated-" + strings.ToLower(strings.ReplaceAll(decision.ID, "-", ""))
 	}
+	recipeSnapshotID := decision.Candidate.ID + ":" + decision.ID
 	body, _ := json.Marshal(decision.Candidate)
 	request, _ := json.Marshal(decision.Request)
 	score, _ := json.Marshal(decision.Score)
@@ -184,11 +204,14 @@ func (p *Postgres) SaveDecision(ctx context.Context, decision domain.Decision) (
 		return decision, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `INSERT INTO recipes(id,title,body,source) VALUES($1,$2,$3,'generated') ON CONFLICT(id) DO UPDATE SET title=EXCLUDED.title, body=EXCLUDED.body, updated_at=now()`, decision.Candidate.ID, decision.Candidate.Title, body); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO recipes(id,title,body,source) VALUES($1,$2,$3,'generated')`, recipeSnapshotID, decision.Candidate.Title, body); err != nil {
 		return decision, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO decisions(id,request,recipe_id,score,violations,status) VALUES($1,$2,$3,$4,$5,$6)`, decision.ID, request, decision.Candidate.ID, score, violations, decision.Status)
+	_, err = tx.Exec(ctx, `INSERT INTO decisions(id,request,recipe_id,score,violations,status) VALUES($1,$2,$3,$4,$5,$6)`, decision.ID, request, recipeSnapshotID, score, violations, decision.Status)
 	if err != nil {
+		return decision, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO decision_events(id,decision_id,event_type,actor,detail) VALUES($1,$2,'proposed','system',$3)`, newID(), decision.ID, score); err != nil {
 		return decision, err
 	}
 	return decision, tx.Commit(ctx)
@@ -227,15 +250,54 @@ func (p *Postgres) Decisions(ctx context.Context, limit int) ([]domain.Decision,
 	return out, rows.Err()
 }
 
+func (p *Postgres) DecisionEvents(ctx context.Context) ([]domain.DecisionEvent, error) {
+	rows, err := p.Pool.Query(ctx, `SELECT id,decision_id,event_type,actor,detail,created_at FROM decision_events ORDER BY created_at DESC LIMIT 200`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.DecisionEvent
+	for rows.Next() {
+		var event domain.DecisionEvent
+		var detail []byte
+		if err := rows.Scan(&event.ID, &event.DecisionID, &event.Type, &event.Actor, &detail, &event.CreatedAt); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(detail, &event.Detail); err != nil {
+			return nil, err
+		}
+		out = append(out, event)
+	}
+	return out, rows.Err()
+}
+
 func (p *Postgres) SetDecisionStatus(ctx context.Context, id, status, correction string) error {
-	command, err := p.Pool.Exec(ctx, `UPDATE decisions SET status=$2,correction=$3,updated_at=now() WHERE id=$1`, id, status, correction)
+	tx, err := p.Pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	if command.RowsAffected() != 1 {
+	defer tx.Rollback(ctx)
+	var foundID string
+	err = tx.QueryRow(ctx, `UPDATE decisions SET status=$2,correction=$3,updated_at=now()
+		WHERE id=$1 AND (status IS DISTINCT FROM $2 OR correction IS DISTINCT FROM $3) RETURNING id`, id, status, correction).Scan(&foundID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var exists bool
+		if queryErr := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM decisions WHERE id=$1)`, id).Scan(&exists); queryErr != nil {
+			return queryErr
+		}
+		if exists {
+			return tx.Commit(ctx)
+		}
 		return pgx.ErrNoRows
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	detail, _ := json.Marshal(map[string]string{"correction": correction})
+	if _, err = tx.Exec(ctx, `INSERT INTO decision_events(id,decision_id,event_type,actor,detail) VALUES($1,$2,$3,'user',$4)`, newID(), id, status, detail); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func (p *Postgres) SaveRating(ctx context.Context, rating domain.Rating, candidate domain.Candidate) ([]domain.PreferenceEvent, error) {
@@ -253,8 +315,29 @@ func (p *Postgres) SaveRating(ctx context.Context, rating domain.Rating, candida
 	if err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE preference_events SET reverted_at=now() WHERE rating_id=$1 AND reverted_at IS NULL`, ratingID); err != nil {
+	rows, err := tx.Query(ctx, `SELECT original.id FROM preference_events original
+		LEFT JOIN preference_events reversal ON reversal.reversal_of=original.id
+		WHERE original.rating_id=$1 AND original.reversal_of IS NULL AND reversal.id IS NULL`, ratingID)
+	if err != nil {
 		return nil, err
+	}
+	var superseded []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		superseded = append(superseded, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, id := range superseded {
+		if _, err := compensatePreferenceEvent(ctx, tx, id, "superseded by an updated rating"); err != nil {
+			return nil, err
+		}
 	}
 	delta := float64(rating.Overall-3) * .25
 	var events []domain.PreferenceEvent
@@ -278,15 +361,28 @@ func (p *Postgres) RevertPreferenceEvent(ctx context.Context, id string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	var profileID string
-	if err := tx.QueryRow(ctx, `UPDATE preference_events SET reverted_at=now() WHERE id=$1 AND reverted_at IS NULL RETURNING profile_id`, id).Scan(&profileID); err != nil {
+	reversal, err := compensatePreferenceEvent(ctx, tx, id, "reverted by user")
+	if err != nil {
 		return err
 	}
-	err = refreshPreferences(ctx, tx, profileID)
+	err = refreshPreferences(ctx, tx, reversal.ProfileID)
 	if err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+func compensatePreferenceEvent(ctx context.Context, tx pgx.Tx, id, reason string) (domain.PreferenceEvent, error) {
+	reversalID := newID()
+	var event domain.PreferenceEvent
+	err := tx.QueryRow(ctx, `INSERT INTO preference_events(id,profile_id,key,delta,reason,rating_id,reversal_of)
+		SELECT $1,original.profile_id,original.key,-original.delta,$3,original.rating_id,original.id
+		FROM preference_events original
+		WHERE original.id=$2 AND original.reversal_of IS NULL
+		  AND NOT EXISTS(SELECT 1 FROM preference_events existing WHERE existing.reversal_of=original.id)
+		RETURNING id,profile_id,key,delta,reason,reversal_of,created_at`, reversalID, id, reason).
+		Scan(&event.ID, &event.ProfileID, &event.Key, &event.Delta, &event.Reason, &event.ReversalOf, &event.CreatedAt)
+	return event, err
 }
 
 func refreshPreferences(ctx context.Context, tx pgx.Tx, profileID string) error {
@@ -295,7 +391,7 @@ func refreshPreferences(ctx context.Context, tx pgx.Tx, profileID string) error 
 			SELECT key, SUM(value)::numeric AS value FROM (
 				SELECT key, value::numeric FROM profiles p, jsonb_each_text(p.base_preferences) WHERE p.id=$1
 				UNION ALL
-				SELECT key, delta FROM preference_events WHERE profile_id=$1 AND reverted_at IS NULL
+				SELECT key, delta FROM preference_events WHERE profile_id=$1
 			) values_by_key GROUP BY key
 		) combined
 	),updated_at=now() WHERE id=$1`, profileID)
@@ -303,7 +399,10 @@ func refreshPreferences(ctx context.Context, tx pgx.Tx, profileID string) error 
 }
 
 func (p *Postgres) PreferenceEvents(ctx context.Context) ([]domain.PreferenceEvent, error) {
-	rows, err := p.Pool.Query(ctx, `SELECT id,profile_id,key,delta,reason,reverted_at,created_at FROM preference_events ORDER BY created_at DESC LIMIT 100`)
+	rows, err := p.Pool.Query(ctx, `SELECT event.id,event.profile_id,event.key,event.delta,event.reason,event.reversal_of,reversal.created_at,event.created_at
+		FROM preference_events event
+		LEFT JOIN preference_events reversal ON reversal.reversal_of=event.id
+		ORDER BY event.created_at DESC LIMIT 100`)
 	if err != nil {
 		return nil, err
 	}
@@ -311,7 +410,7 @@ func (p *Postgres) PreferenceEvents(ctx context.Context) ([]domain.PreferenceEve
 	var out []domain.PreferenceEvent
 	for rows.Next() {
 		var event domain.PreferenceEvent
-		if err := rows.Scan(&event.ID, &event.ProfileID, &event.Key, &event.Delta, &event.Reason, &event.RevertedAt, &event.CreatedAt); err != nil {
+		if err := rows.Scan(&event.ID, &event.ProfileID, &event.Key, &event.Delta, &event.Reason, &event.ReversalOf, &event.RevertedAt, &event.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, event)
