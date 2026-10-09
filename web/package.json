@@ -9,6 +9,7 @@
     "lint": "oxlint",
     "test": "vitest run",
     "test:migrations": "node scripts/validate-migration.mjs",
+    "test:ui:chrome": "node scripts/verify-ui.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -26,6 +27,7 @@
     "vite-plugin-pwa": "^2.0.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@electric-sql/pglite": "^0.5.8",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
@@ -35,6 +37,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "jsdom": "^29.1.1",
     "oxlint": "^1.81.0",
+    "playwright-core": "^1.64.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0",
     "vitest": "^5.0.3"
